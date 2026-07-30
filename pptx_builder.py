@@ -405,7 +405,8 @@ def build_pptx(data, out_path, base_dir=".", spec_img=None):
                 add_picture_fit(slide, sh["img"], img_left, ty, img_w, thumb_h - Inches(0.1))
             else:
                 txbox(slide, img_left, ty, img_w, thumb_h - Inches(0.1),
-                      "尚未提供參考素材\n（待填「參考素材」欄位）", size=10, color=GREY,
+                      "尚未提供參考素材\n（資料庫沒有對應素材，或可在 Notion 這個鏡頭底下貼圖）",
+                      size=10, color=GREY,
                       align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
             txbox(slide, img_left, ty, Inches(0.55), Inches(0.32), f"圖{i}", size=11, bold=True,
                   color=WHITE, fill=DARK, border=False)

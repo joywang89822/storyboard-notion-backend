@@ -7,7 +7,10 @@
 部署方式、Notion Automation 按鈕怎麼設定，見 SETUP.md。
 """
 import os
+import sys
 import tempfile
+import threading
+import traceback
 
 from flask import Flask, request, jsonify
 
@@ -34,6 +37,41 @@ def _authorized():
     return _get_param("secret") == WEBHOOK_SECRET
 
 
+_LAST_THREAD = None  # 只給測試用，讓測試可以 join 等背景工作跑完再檢查結果
+
+
+def _run_in_background(fn, *args):
+    """Notion 按鈕的 Webhook 動作等不了太久（免費方案 Render 剛好休眠時，喚醒+處理
+    很容易超過 Notion 那邊的逾時），所以先立刻回 202，實際工作丟到背景執行緒，
+    做完直接呼叫 Notion API 把結果寫回頁面，不需要透過原本那次請求的回應。"""
+    global _LAST_THREAD
+
+    def wrapper():
+        try:
+            fn(*args)
+        except Exception:  # noqa: BLE001 — 背景執行緒裡的例外不會有人接，印到 log 才看得到
+            traceback.print_exc(file=sys.stderr)
+    t = threading.Thread(target=wrapper, daemon=True)
+    _LAST_THREAD = t
+    t.start()
+    return t
+
+
+def _do_generate(page_id, title):
+    data = parse_page(page_id, NOTION_TOKEN, title=title)
+    with tempfile.TemporaryDirectory() as tmp:
+        materialize_images(data, tmp)
+        out_name = f"{data['meta']['素材名稱']}_分鏡腳本.pptx"
+        out_path = os.path.join(tmp, out_name)
+        build_pptx(data, out_path, base_dir=tmp)
+        upload_file_to_page(page_id, NOTION_TOKEN, out_path, out_name)
+
+
+def _do_summary(page_id, title):
+    data = parse_page(page_id, NOTION_TOKEN, title=title)
+    refresh_summary_table(page_id, NOTION_TOKEN, data["scenes"])
+
+
 @app.route("/generate-pptx", methods=["POST"])
 def generate_pptx():
     if not _authorized():
@@ -42,17 +80,8 @@ def generate_pptx():
     if not page_id:
         return jsonify({"error": "missing page_id"}), 400
 
-    try:
-        data = parse_page(page_id, NOTION_TOKEN, title=_get_param("title"))
-        with tempfile.TemporaryDirectory() as tmp:
-            materialize_images(data, tmp)
-            out_name = f"{data['meta']['素材名稱']}_分鏡腳本.pptx"
-            out_path = os.path.join(tmp, out_name)
-            build_pptx(data, out_path, base_dir=tmp)
-            upload_file_to_page(page_id, NOTION_TOKEN, out_path, out_name)
-        return jsonify({"ok": True, "asset_name": data["meta"]["素材名稱"]})
-    except Exception as e:  # noqa: BLE001 — 回錯誤訊息給 Notion 側好排查
-        return jsonify({"error": str(e)}), 500
+    _run_in_background(_do_generate, page_id, _get_param("title"))
+    return jsonify({"ok": True, "status": "processing"}), 202
 
 
 @app.route("/refresh-summary", methods=["POST"])
@@ -63,12 +92,8 @@ def refresh_summary():
     if not page_id:
         return jsonify({"error": "missing page_id"}), 400
 
-    try:
-        data = parse_page(page_id, NOTION_TOKEN, title=_get_param("title"))
-        n = refresh_summary_table(page_id, NOTION_TOKEN, data["scenes"])
-        return jsonify({"ok": True, "rows": n})
-    except Exception as e:  # noqa: BLE001
-        return jsonify({"error": str(e)}), 500
+    _run_in_background(_do_summary, page_id, _get_param("title"))
+    return jsonify({"ok": True, "status": "processing"}), 202
 
 
 @app.route("/", methods=["GET"])
@@ -85,6 +110,7 @@ def debug_assets():
     if sample:
         sample_img_exists = bool(am.resolve_image_path(sample))
     match_row, match_note = am.match_asset("中撲jingle", ["3D"])
+    normal_row, normal_note = am.match_asset("主角第一視角瞇牌、手牌為KK", ["3D"])
     return jsonify({
         "keyword_entries": len(am._KEYWORD_MAP),
         "index_rows": len(am._INDEX),
@@ -94,6 +120,9 @@ def debug_assets():
         "sample_image_exists_on_disk": sample_img_exists,
         "jingle_test_match": (match_row or {}).get("file_name"),
         "jingle_test_note": match_note,
+        "normal_test_match": (normal_row or {}).get("file_name"),
+        "normal_test_note": normal_note,
+        "normal_test_image_exists": bool(am.resolve_image_path(normal_row)) if normal_row else None,
     })
 
 

@@ -111,6 +111,7 @@ def debug_assets():
         sample_img_exists = bool(am.resolve_image_path(sample))
     match_row, match_note = am.match_asset("中撲jingle", ["3D"])
     normal_row, normal_note = am.match_asset("主角第一視角瞇牌、手牌為KK", ["3D"])
+    kkk_row, kkk_note = am.match_asset("KKK邊框發光", ["3D"])
     return jsonify({
         "keyword_entries": len(am._KEYWORD_MAP),
         "index_rows": len(am._INDEX),
@@ -123,6 +124,8 @@ def debug_assets():
         "normal_test_match": (normal_row or {}).get("file_name"),
         "normal_test_note": normal_note,
         "normal_test_image_exists": bool(am.resolve_image_path(normal_row)) if normal_row else None,
+        "kkk_test_match": (kkk_row or {}).get("file_name"),
+        "kkk_test_note": kkk_note,
     })
 
 

@@ -8,10 +8,18 @@
 """
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor
+
 import requests
 
 NOTION_VERSION = "2022-06-28"
 API = "https://api.notion.com/v1"
+
+# 這些子樹我們解析時用不到（例如純參考用的尺寸對照表），遞迴抓取時直接跳過，
+# 避免浪費 API 呼叫次數拖慢整體速度（Render 免費方案本來就慢，頁面 toggle 一多很容易逾時）。
+SKIP_SUBTREE_PREFIXES = ["原始尺寸對照表"]
+
+_session = requests.Session()
 
 FIELD_PREFIXES = [
     "場景/道具", "音樂", "音效", "動作描述", "對白/字卡文案", "秒數",
@@ -46,7 +54,7 @@ def _get_children(block_id, token):
         params = {"page_size": 100}
         if cursor:
             params["start_cursor"] = cursor
-        r = requests.get(f"{API}/blocks/{block_id}/children", headers=_headers(token), params=params, timeout=30)
+        r = _session.get(f"{API}/blocks/{block_id}/children", headers=_headers(token), params=params, timeout=30)
         r.raise_for_status()
         data = r.json()
         results.extend(data["results"])
@@ -56,15 +64,32 @@ def _get_children(block_id, token):
     return results
 
 
-def fetch_tree(block_id, token):
-    """遞迴抓整棵區塊樹，每個 block dict 會多一個 "_children" key。"""
-    children = _get_children(block_id, token)
-    for b in children:
-        if b.get("has_children"):
-            b["_children"] = fetch_tree(b["id"], token)
-        else:
-            b["_children"] = []
-    return children
+def _should_skip(block):
+    text = _text(block).strip()
+    return any(text.startswith(p) for p in SKIP_SUBTREE_PREFIXES)
+
+
+def fetch_tree(block_id, token, _executor=None):
+    """遞迴抓整棵區塊樹，每個 block dict 會多一個 "_children" key。
+
+    同一層的子節點平行抓取（Notion API 是 I/O bound，序列抓十幾個 toggle 很容易在
+    Render 免費方案上逾時），並跳過 SKIP_SUBTREE_PREFIXES 裡列的、我們用不到的子樹。
+    """
+    owns_executor = _executor is None
+    executor = _executor or ThreadPoolExecutor(max_workers=4)
+    try:
+        children = _get_children(block_id, token)
+        to_fetch = [b for b in children if b.get("has_children") and not _should_skip(b)]
+        futures = {b["id"]: executor.submit(fetch_tree, b["id"], token, executor) for b in to_fetch}
+        for b in children:
+            if b["id"] in futures:
+                b["_children"] = futures[b["id"]].result()
+            else:
+                b["_children"] = []
+        return children
+    finally:
+        if owns_executor:
+            executor.shutdown(wait=True)
 
 
 def _rt_plain(rich_text):

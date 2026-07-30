@@ -3,19 +3,26 @@
 import requests
 from notion_parser import API, _headers
 
+PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+
 
 def upload_file_to_page(page_id, token, file_path, filename):
     r = requests.post(
         f"{API}/file_uploads",
         headers={**_headers(token), "Content-Type": "application/json"},
-        json={},
+        json={"filename": filename, "content_type": PPTX_MIME},
         timeout=30,
     )
     r.raise_for_status()
     upload = r.json()
 
     with open(file_path, "rb") as f:
-        r2 = requests.post(upload["upload_url"], headers=_headers(token), files={"file": (filename, f)}, timeout=180)
+        r2 = requests.post(
+            upload["upload_url"],
+            headers=_headers(token),
+            files={"file": (filename, f, PPTX_MIME)},
+            timeout=180,
+        )
     r2.raise_for_status()
 
     r3 = requests.patch(

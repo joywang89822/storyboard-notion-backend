@@ -69,27 +69,27 @@ def _should_skip(block):
     return any(text.startswith(p) for p in SKIP_SUBTREE_PREFIXES)
 
 
-def fetch_tree(block_id, token, _executor=None):
+def fetch_tree(block_id, token):
     """遞迴抓整棵區塊樹，每個 block dict 會多一個 "_children" key。
 
     同一層的子節點平行抓取（Notion API 是 I/O bound，序列抓十幾個 toggle 很容易在
     Render 免費方案上逾時），並跳過 SKIP_SUBTREE_PREFIXES 裡列的、我們用不到的子樹。
+
+    注意：每一層遞迴都開自己獨立的 ThreadPoolExecutor，用完就關掉，不會跨層共用同一個
+    池子——共用池子 + 遞迴呼叫時阻塞等待子任務結果，會有 thread pool 死鎖的風險
+    （worker 全部卡在互相等待，永遠不會有人真的去執行排隊中的子任務）。
     """
-    owns_executor = _executor is None
-    executor = _executor or ThreadPoolExecutor(max_workers=4)
-    try:
-        children = _get_children(block_id, token)
-        to_fetch = [b for b in children if b.get("has_children") and not _should_skip(b)]
-        futures = {b["id"]: executor.submit(fetch_tree, b["id"], token, executor) for b in to_fetch}
-        for b in children:
-            if b["id"] in futures:
-                b["_children"] = futures[b["id"]].result()
-            else:
-                b["_children"] = []
-        return children
-    finally:
-        if owns_executor:
-            executor.shutdown(wait=True)
+    children = _get_children(block_id, token)
+    to_fetch = [b for b in children if b.get("has_children") and not _should_skip(b)]
+    if to_fetch:
+        with ThreadPoolExecutor(max_workers=min(len(to_fetch), 8)) as executor:
+            results = list(executor.map(lambda b: fetch_tree(b["id"], token), to_fetch))
+        fetched = dict(zip((b["id"] for b in to_fetch), results))
+    else:
+        fetched = {}
+    for b in children:
+        b["_children"] = fetched.get(b["id"], [])
+    return children
 
 
 def _rt_plain(rich_text):

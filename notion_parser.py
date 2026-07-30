@@ -64,6 +64,17 @@ def _get_children(block_id, token):
     return results
 
 
+def _image_url(block):
+    """從一個 Notion "image" 區塊拿出可以直接下載的網址。同事直接把圖片貼到頁面裡
+    （拖曳上傳或貼上網址皆可）就會產生這種區塊。"""
+    img = block.get("image", {})
+    if img.get("type") == "external":
+        return img.get("external", {}).get("url")
+    if img.get("type") == "file":
+        return img.get("file", {}).get("url")
+    return None
+
+
 def _should_skip(block):
     text = _text(block).strip()
     return any(text.startswith(p) for p in SKIP_SUBTREE_PREFIXES)
@@ -217,6 +228,15 @@ def parse_scenes(scene_blocks):
         if m:
             flush_shot()
             cur_shot = {"angle": "", "position": "", "action": "", "line": "", "seconds": "", "note": ""}
+            continue
+
+        if t == "image":
+            url = _image_url(b)
+            if url:
+                if cur_shot is not None:
+                    cur_shot["image_url"] = url
+                else:
+                    cur_scene["image_url"] = url
             continue
 
         if t == "toggle" and cur_shot is not None:

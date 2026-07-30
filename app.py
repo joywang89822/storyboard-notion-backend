@@ -15,6 +15,7 @@ from notion_parser import parse_page
 from pptx_builder import build_pptx
 from summary import refresh_summary_table
 from file_upload import upload_file_to_page
+from images import materialize_images
 
 app = Flask(__name__)
 
@@ -38,6 +39,7 @@ def generate_pptx():
     try:
         data = parse_page(page_id, NOTION_TOKEN, title=body.get("title", ""))
         with tempfile.TemporaryDirectory() as tmp:
+            materialize_images(data, tmp)
             out_name = f"{data['meta']['素材名稱']}_分鏡腳本.pptx"
             out_path = os.path.join(tmp, out_name)
             build_pptx(data, out_path, base_dir=tmp)

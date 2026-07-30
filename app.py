@@ -76,5 +76,26 @@ def health():
     return jsonify({"status": "ok"})
 
 
+@app.route("/debug/assets", methods=["GET"])
+def debug_assets():
+    """診斷用：確認部署到 Render 上的伺服器，實際看不看得到參考素材資料庫。"""
+    import asset_matcher as am
+    sample = am._INDEX[0] if am._INDEX else None
+    sample_img_exists = None
+    if sample:
+        sample_img_exists = bool(am.resolve_image_path(sample))
+    match_row, match_note = am.match_asset("中撲jingle", ["3D"])
+    return jsonify({
+        "keyword_entries": len(am._KEYWORD_MAP),
+        "index_rows": len(am._INDEX),
+        "base_dir": am.BASE_DIR,
+        "base_dir_exists": os.path.isdir(am.BASE_DIR),
+        "sample_row": sample,
+        "sample_image_exists_on_disk": sample_img_exists,
+        "jingle_test_match": (match_row or {}).get("file_name"),
+        "jingle_test_note": match_note,
+    })
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))

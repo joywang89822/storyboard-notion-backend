@@ -2,3 +2,4 @@ __pycache__/
 *.pyc
 test_data/out.pptx
 .env
+reference_assets/*.xlsx

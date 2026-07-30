@@ -273,9 +273,22 @@ def parse_scenes(scene_blocks):
     return scenes
 
 
+def fetch_page_title(page_id, token):
+    """直接跟 Notion 要這個頁面自己的標題，不依賴呼叫端另外傳。"""
+    r = _session.get(f"{API}/pages/{page_id}", headers=_headers(token), timeout=30)
+    r.raise_for_status()
+    props = r.json().get("properties", {})
+    for prop in props.values():
+        if prop.get("type") == "title":
+            return _rt_plain(prop.get("title", []))
+    return ""
+
+
 def parse_page(page_id, token, title=None, today_str=None):
     from datetime import date
     today_str = today_str or date.today().strftime("%Y%m%d")
+    if title is None:
+        title = fetch_page_title(page_id, token)
 
     tree = fetch_tree(page_id, token)
 

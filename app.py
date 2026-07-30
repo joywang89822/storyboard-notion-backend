@@ -23,21 +23,27 @@ NOTION_TOKEN = os.environ["NOTION_TOKEN"]
 WEBHOOK_SECRET = os.environ["WEBHOOK_SECRET"]
 
 
-def _authorized(body):
-    return body.get("secret") == WEBHOOK_SECRET
+def _get_param(name):
+    """相容兩種來源：陽春版 Notion 按鈕只能帶查詢參數/自訂標頭，沒有 Body 可用；
+    如果之後方案升級有 Body，也一樣吃得到（手動測試也常用 Body）。"""
+    body = request.get_json(force=True, silent=True) or {}
+    return request.args.get(name) or request.headers.get(f"X-{name}") or body.get(name)
+
+
+def _authorized():
+    return _get_param("secret") == WEBHOOK_SECRET
 
 
 @app.route("/generate-pptx", methods=["POST"])
 def generate_pptx():
-    body = request.get_json(force=True, silent=True) or {}
-    if not _authorized(body):
+    if not _authorized():
         return jsonify({"error": "unauthorized"}), 401
-    page_id = body.get("page_id")
+    page_id = _get_param("page_id")
     if not page_id:
         return jsonify({"error": "missing page_id"}), 400
 
     try:
-        data = parse_page(page_id, NOTION_TOKEN, title=body.get("title", ""))
+        data = parse_page(page_id, NOTION_TOKEN, title=_get_param("title"))
         with tempfile.TemporaryDirectory() as tmp:
             materialize_images(data, tmp)
             out_name = f"{data['meta']['素材名稱']}_分鏡腳本.pptx"
@@ -51,15 +57,14 @@ def generate_pptx():
 
 @app.route("/refresh-summary", methods=["POST"])
 def refresh_summary():
-    body = request.get_json(force=True, silent=True) or {}
-    if not _authorized(body):
+    if not _authorized():
         return jsonify({"error": "unauthorized"}), 401
-    page_id = body.get("page_id")
+    page_id = _get_param("page_id")
     if not page_id:
         return jsonify({"error": "missing page_id"}), 400
 
     try:
-        data = parse_page(page_id, NOTION_TOKEN, title=body.get("title", ""))
+        data = parse_page(page_id, NOTION_TOKEN, title=_get_param("title"))
         n = refresh_summary_table(page_id, NOTION_TOKEN, data["scenes"])
         return jsonify({"ok": True, "rows": n})
     except Exception as e:  # noqa: BLE001

@@ -6,6 +6,7 @@
 保留表頭那一列，把底下的資料列整批刪掉重建。
 """
 import os
+import re
 import requests
 from notion_parser import _headers, API, NOTION_VERSION, fetch_tree, _text  # noqa: F401
 
@@ -31,6 +32,18 @@ def build_rows(scenes):
     return rows
 
 
+def _total_seconds(scenes):
+    total = 0.0
+    for s in scenes:
+        for sh in s["shots"]:
+            m = re.match(r"([\d.]+)", str(sh.get("seconds", "0") or "0"))
+            if m:
+                total += float(m.group(1))
+    if total == int(total):
+        return f"{int(total)}s"
+    return f"{total}s"
+
+
 def refresh_summary_table(page_id, token, scenes):
     tree = fetch_tree(page_id, token)
     table = _find_first_table(tree)
@@ -47,6 +60,7 @@ def refresh_summary_table(page_id, token, scenes):
         r.raise_for_status()
 
     data_rows = build_rows(scenes)
+    data_rows.append(["總秒數", "", _total_seconds(scenes), "", "", ""])
     new_children = [
         {"type": "table_row", "table_row": {"cells": [_cell(c) for c in row]}}
         for row in data_rows

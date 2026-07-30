@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: storyboard-notion-backend
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    envVars:
+      - key: NOTION_TOKEN
+        sync: false
+      - key: WEBHOOK_SECRET
+        sync: false

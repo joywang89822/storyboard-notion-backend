@@ -19,6 +19,7 @@ from pptx_builder import build_pptx
 from summary import refresh_summary_table
 from file_upload import upload_file_to_page
 from images import materialize_images
+from detail_writer import expand_to_detail
 
 app = Flask(__name__)
 
@@ -72,6 +73,10 @@ def _do_summary(page_id, title):
     refresh_summary_table(page_id, NOTION_TOKEN, data["scenes"])
 
 
+def _do_expand(page_id, title):
+    expand_to_detail(page_id, NOTION_TOKEN)
+
+
 @app.route("/generate-pptx", methods=["POST"])
 def generate_pptx():
     if not _authorized():
@@ -93,6 +98,18 @@ def refresh_summary():
         return jsonify({"error": "missing page_id"}), 400
 
     _run_in_background(_do_summary, page_id, _get_param("title"))
+    return jsonify({"ok": True, "status": "processing"}), 202
+
+
+@app.route("/expand-detail", methods=["POST"])
+def expand_detail():
+    if not _authorized():
+        return jsonify({"error": "unauthorized"}), 401
+    page_id = _get_param("page_id")
+    if not page_id:
+        return jsonify({"error": "missing page_id"}), 400
+
+    _run_in_background(_do_expand, page_id, _get_param("title"))
     return jsonify({"ok": True, "status": "processing"}), 202
 
 

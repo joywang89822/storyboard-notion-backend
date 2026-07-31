@@ -16,6 +16,7 @@
 「更新摘要」才會更新。
 """
 import re
+import sys
 import requests
 
 import angle_matcher
@@ -29,10 +30,18 @@ KNOWN_TOP_LEVEL_TYPES = {
 }
 
 
+def _raise_with_body(r):
+    """r.raise_for_status() 本身的錯誤訊息只有狀態碼跟網址，看不到 Notion 實際說哪裡錯；
+    400 時把 response body（通常有具體的 validation 錯誤訊息）印到 log 方便除錯。"""
+    if r.status_code >= 400:
+        print(f"Notion API {r.status_code} {r.request.method} {r.url} -> {r.text}", file=sys.stderr)
+    r.raise_for_status()
+
+
 def _patch_block(block_id, payload, token):
     r = requests.patch(f"{API}/blocks/{block_id}", headers={**_headers(token), "Content-Type": "application/json"},
                         json=payload, timeout=30)
-    r.raise_for_status()
+    _raise_with_body(r)
 
 
 def _append_children(parent_id, children, token, after=None):
@@ -41,14 +50,14 @@ def _append_children(parent_id, children, token, after=None):
         payload["after"] = after
     r = requests.patch(f"{API}/blocks/{parent_id}/children",
                         headers={**_headers(token), "Content-Type": "application/json"}, json=payload, timeout=30)
-    r.raise_for_status()
+    _raise_with_body(r)
     return r.json()["results"]
 
 
 def _delete_block(block_id, token):
     try:
         r = requests.delete(f"{API}/blocks/{block_id}", headers=_headers(token), timeout=30)
-        r.raise_for_status()
+        _raise_with_body(r)
     except requests.RequestException:
         pass  # 舊區塊刪不掉不影響這次同步的其他部分，最多是留著沒清乾淨
 

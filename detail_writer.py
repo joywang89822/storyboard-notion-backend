@@ -11,6 +11,9 @@
 - 上方表格新增的「分鏡」「鏡頭」→ 在下方對應位置插入新區塊
 - 上方表格拿掉的「分鏡」「鏡頭」→ 下方對應區塊會被整段刪除
 - 上方表格還在的「鏡頭」→ 整段覆蓋重建該鏡頭的勾選框跟文字欄位
+
+順便會把「總秒數」那列重算（加總上方表格目前每一列的秒數），不用手動加、也不用另外按
+「更新摘要」才會更新。
 """
 import re
 import requests
@@ -62,6 +65,33 @@ def _label_value_rt(label, value):
     if value:
         rt.append({"type": "text", "text": {"content": value}})
     return rt
+
+
+def _cell_rt(text):
+    return [{"type": "text", "text": {"content": str(text)}}] if text else []
+
+
+def _total_seconds_from_rows(rows):
+    total = 0.0
+    for r in rows:
+        m = re.match(r"([\d.]+)", str(r.get("seconds") or "0"))
+        if m:
+            total += float(m.group(1))
+    if total == int(total):
+        return f"{int(total)}s"
+    return f"{total}s"
+
+
+def _sync_total_row(table, total_str, token):
+    """把「總秒數」那列的秒數欄，換成用上方表格目前每一列秒數加總算出來的值——這樣直接在上方
+    表格打字（不透過「更新摘要」按鈕）也不用自己手動加總、手動改這格。"""
+    new_cells = [_cell_rt("總秒數"), _cell_rt(""), _cell_rt(total_str), _cell_rt(""), _cell_rt(""), _cell_rt("")]
+    for row in table.get("_children", [])[1:]:
+        cells = row.get("table_row", {}).get("cells", [])
+        if cells and _rt_plain(cells[0]).strip() == "總秒數":
+            _patch_block(row["id"], {"table_row": {"cells": new_cells}}, token)
+            return
+    _append_children(table["id"], [{"type": "table_row", "table_row": {"cells": new_cells}}], token)
 
 
 def _parse_table_rows(table):
@@ -288,3 +318,5 @@ def expand_to_detail(page_id, token):
     for sid, scene_idx in existing.items():
         if sid not in scene_rows:
             _delete_scene(scene_idx, token)
+
+    _sync_total_row(table, _total_seconds_from_rows(rows), token)

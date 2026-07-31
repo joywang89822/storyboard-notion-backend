@@ -74,7 +74,7 @@ summary_table = table([
     table_row(["1", "1", "1s", "", "主角俯視看牌", ""]),
     table_row(["1", "2", "2s", "", "特寫拍攝金幣", "三條"]),
     table_row(["2", "1", "3s", "全景", "中撲jingle", ""]),
-    table_row(["總秒數", "", "6s", "", "", ""]),
+    table_row(["總秒數", "", "99s", "", "", ""], id_="total_row"),  # 故意放錯的舊值，驗證會被重算覆蓋
 ])
 
 # 下方「分鏡內容」：分鏡1鏡頭1既有（動作是舊文字，鏡位 toggle 只有 3 個選項，沒有「特寫」）
@@ -182,5 +182,10 @@ assert len(new_scene_appends) == 1, calls["append"]
 scene3_ids = {b["id"] for b in scene3}
 assert scene3_ids.issubset(set(calls["delete"])), (scene3_ids, calls["delete"])
 assert "btn1" not in calls["delete"]
+
+# 7) 總秒數要順便被重算：1s+2s+3s=6s，蓋掉表格裡原本錯的 99s
+total_patches = [p for bid, p in calls["patch"] if bid == "total_row"]
+assert len(total_patches) == 1, calls["patch"]
+assert total_patches[0]["table_row"]["cells"][2][0]["text"]["content"] == "6s", total_patches[0]
 
 print("ALL ASSERTIONS PASSED")

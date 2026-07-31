@@ -150,6 +150,14 @@ new_shot_appends = [
 ]
 assert len(new_shot_appends) == 1, calls["append"]
 
+# 4b) Notion API 規定巢狀 children 要跟 "toggle"/"type" 同一層，不能塞在 "toggle" 裡面 —
+#     這裡曾經寫錯過（塞進 toggle 物件內），會被 Notion 判成 400 Bad Request
+for _, _, children in new_shot_appends:
+    for b in children:
+        if b.get("type") == "toggle":
+            assert "children" in b, "toggle 區塊沒有帶 children，勾選框不會被建立"
+            assert "children" not in b["toggle"], "children 不能塞在 toggle 物件裡面，要跟 type/toggle 同一層"
+
 # 5) 分鏡2 是全新分鏡：應該被 append 到 page 底下，且用「中撲jingle」當動作文字
 new_scene_appends = [
     (parent, after, children) for parent, after, children in calls["append"]

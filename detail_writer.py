@@ -169,10 +169,10 @@ def _new_shot_blocks(shot_no, row):
 
     return [
         {"type": "paragraph", "paragraph": {"rich_text": _plain_rt(marker, bold=True)}},
-        {"type": "toggle", "toggle": {"rich_text": _plain_rt("角度/運鏡"), "color": "yellow_background",
-                                       "children": angle_children}},
-        {"type": "toggle", "toggle": {"rich_text": _plain_rt("鏡位"), "color": "yellow_background",
-                                       "children": position_children}},
+        {"type": "toggle", "toggle": {"rich_text": _plain_rt("角度/運鏡"), "color": "yellow_background"},
+         "children": angle_children},
+        {"type": "toggle", "toggle": {"rich_text": _plain_rt("鏡位"), "color": "yellow_background"},
+         "children": position_children},
         {"type": "paragraph", "paragraph": {"rich_text": _label_value_rt("動作描述", row["action"])}},
         {"type": "paragraph", "paragraph": {"rich_text": _label_value_rt("對白/字卡文案", row["line"])}},
         {"type": "paragraph", "paragraph": {"rich_text": _label_value_rt("秒數", row["seconds"])}},

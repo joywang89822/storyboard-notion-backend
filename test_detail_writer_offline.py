@@ -102,12 +102,12 @@ def fake_patch_block(block_id, payload, token):
 
 
 def fake_append_children(parent_id, children, token, after=None):
-    calls["append"].append((parent_id, after, children))
     results = []
     for c in children:
         c = dict(c)
         c["id"] = new_id("new")
         results.append(c)
+    calls["append"].append((parent_id, after, children, results))
     return results
 
 
@@ -141,12 +141,12 @@ assert patched_ids[by_label["俯視"]]["to_do"]["checked"] is True
 
 # 3) 鏡位 toggle 原本沒有「特寫」選項，應該要被自動新增（透過 append_children 加進該 toggle）
 pos_tg_id = scene1_shot1[2]["id"]
-appended_into_pos_tg = [c for parent, after, children in calls["append"] if parent == pos_tg_id for c in children]
+appended_into_pos_tg = [c for parent, after, children, results in calls["append"] if parent == pos_tg_id for c in children]
 assert any(c["to_do"]["rich_text"][0]["text"]["content"] == "特寫" for c in appended_into_pos_tg), appended_into_pos_tg
 
 # 4) 分鏡1鏡頭2 是新鏡頭：應該被 append 到分鏡1底下（parent 是 page_id，不是某個 toggle）
 new_shot_appends = [
-    (parent, after, children) for parent, after, children in calls["append"]
+    (parent, after, children, results) for parent, after, children, results in calls["append"]
     if parent == "fake_page_id" and any(
         b.get("type") == "paragraph" and "鏡頭 2" in b["paragraph"]["rich_text"][0]["text"]["content"]
         for b in children
@@ -155,27 +155,42 @@ new_shot_appends = [
 assert len(new_shot_appends) == 1, calls["append"]
 
 # 4a) 新鏡頭的動作/對白/秒數也要建成 bulleted_list_item，跟範本現有格式一致
-for _, _, children in new_shot_appends:
+for _, _, children, _ in new_shot_appends:
     label_blocks = [b for b in children if b.get("type") == "bulleted_list_item"]
     assert len(label_blocks) == 3, children  # 動作描述、對白/字卡文案、秒數
 
-# 4b) Notion API 規定巢狀 children 要跟 "toggle"/"type" 同一層，不能塞在 "toggle" 裡面 —
-#     這裡曾經寫錯過（塞進 toggle 物件內），會被 Notion 判成 400 Bad Request
-for _, _, children in new_shot_appends:
+# 4b) 建立 toggle 當下絕對不能帶巢狀 children —— Notion API 對「新建 toggle 同時塞巢狀
+#     children」這個組合有時候會回 400 body validation 錯誤（原因抓不出來），已經改成兩段式：
+#     先建空 toggle，事後再用另一次 append 把打勾選項塞進去
+for _, _, children, results in new_shot_appends:
     for b in children:
         if b.get("type") == "toggle":
-            assert "children" in b, "toggle 區塊沒有帶 children，勾選框不會被建立"
-            assert "children" not in b["toggle"], "children 不能塞在 toggle 物件裡面，要跟 type/toggle 同一層"
+            assert "children" not in b, "toggle 不該在建立當下就帶 children，要事後另外 append"
+    # 4c) 這兩個新建的 toggle，事後應該各自有一次 append_children 把選項塞進去
+    toggle_ids = [r["id"] for r, b in zip(results, children) if b.get("type") == "toggle"]
+    assert len(toggle_ids) == 2, results
+    for tid in toggle_ids:
+        populated = [c for parent, after, ch, res in calls["append"] if parent == tid for c in ch]
+        assert populated, f"toggle {tid} 事後沒有被塞入打勾選項"
+        assert all(c.get("type") == "to_do" for c in populated), populated
 
 # 5) 分鏡2 是全新分鏡：應該被 append 到 page 底下，且用「中撲jingle」當動作文字
 new_scene_appends = [
-    (parent, after, children) for parent, after, children in calls["append"]
+    (parent, after, children, results) for parent, after, children, results in calls["append"]
     if parent == "fake_page_id" and any(
         b.get("type") == "heading_2" and b["heading_2"]["rich_text"][0]["text"]["content"] == "分鏡 2"
         for b in children
     )
 ]
 assert len(new_scene_appends) == 1, calls["append"]
+
+# 5a) 分鏡2 裡新建的兩個 toggle（鏡頭1的角度/鏡位），事後也要各自被補上打勾選項
+for _, _, children, results in new_scene_appends:
+    toggle_ids = [r["id"] for r, b in zip(results, children) if b.get("type") == "toggle"]
+    assert len(toggle_ids) == 2, results
+    for tid in toggle_ids:
+        populated = [c for parent, after, ch, res in calls["append"] if parent == tid for c in ch]
+        assert populated, f"toggle {tid} 事後沒有被塞入打勾選項"
 
 # 6) 分鏡3 在上方表格已經不存在：整段（含鏡頭6個區塊+divider+heading等）應該被刪除，
 #    但緊接在它後面、我們認不得的按鈕區塊絕對不能被刪掉

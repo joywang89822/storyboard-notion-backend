@@ -193,12 +193,34 @@ def _last_content_block_id(tree):
     return tree[-1]["id"] if tree else None
 
 
-def _new_shot_blocks(shot_no, row):
-    marker = f"鏡頭 {shot_no}：" if shot_no == "1" else f"鏡頭 {shot_no}（沒有可刪除）："
-    combined = f"{row['position_text']} {row['action']}"
-    angle_val = angle_matcher.detect_angle(combined)
-    pos_val = angle_matcher.detect_position(combined)
+SCENE_HEADER_BLOCK_COUNT = 4  # heading + 場景/道具 + 音樂 + 音效
+SHOT_BLOCK_COUNT = 6  # marker + 角度/運鏡 toggle + 鏡位 toggle + 動作描述 + 對白/字卡文案 + 秒數
 
+
+def _detect_for_row(row):
+    combined = f"{row['position_text']} {row['action']}"
+    return angle_matcher.detect_angle(combined), angle_matcher.detect_position(combined)
+
+
+def _new_shot_blocks(shot_no, row):
+    """故意不在建立 toggle 的同一次請求裡帶 children（打勾選項）：Notion API 對「新建 toggle
+    同時塞巢狀 children」這個組合有時候會回 400 body validation 錯誤，原因抓不出來，但「先建立
+    空 toggle，另外用一次 append 把選項塞進去」這個兩段式寫法一直都穩定，所以統一改用這個方式，
+    交給 _populate_shot_toggles 事後補打勾選項。"""
+    marker = f"鏡頭 {shot_no}：" if shot_no == "1" else f"鏡頭 {shot_no}（沒有可刪除）："
+    return [
+        {"type": "paragraph", "paragraph": {"rich_text": _plain_rt(marker, bold=True)}},
+        {"type": "toggle", "toggle": {"rich_text": _plain_rt("角度/運鏡"), "color": "yellow_background"}},
+        {"type": "toggle", "toggle": {"rich_text": _plain_rt("鏡位"), "color": "yellow_background"}},
+        {"type": "bulleted_list_item", "bulleted_list_item": {"rich_text": _label_value_rt("動作描述", row["action"])}},
+        {"type": "bulleted_list_item", "bulleted_list_item": {"rich_text": _label_value_rt("對白/字卡文案", row["line"])}},
+        {"type": "bulleted_list_item", "bulleted_list_item": {"rich_text": _label_value_rt("秒數", row["seconds"])}},
+    ]
+
+
+def _populate_shot_toggles(shot_created_blocks, angle_val, pos_val, token):
+    """shot_created_blocks：剛剛建立好、已經有真實 id 的 6 個區塊，順序跟 _new_shot_blocks
+    回傳的一樣（index 1 = 角度/運鏡 toggle，index 2 = 鏡位 toggle）。"""
     angle_children = [
         {"type": "to_do", "to_do": {"rich_text": _plain_rt(opt), "checked": opt == angle_val}}
         for opt in angle_matcher.ANGLE_OPTIONS
@@ -207,17 +229,8 @@ def _new_shot_blocks(shot_no, row):
         {"type": "to_do", "to_do": {"rich_text": _plain_rt(opt), "checked": opt == pos_val}}
         for opt in angle_matcher.POSITION_OPTIONS
     ]
-
-    return [
-        {"type": "paragraph", "paragraph": {"rich_text": _plain_rt(marker, bold=True)}},
-        {"type": "toggle", "toggle": {"rich_text": _plain_rt("角度/運鏡"), "color": "yellow_background"},
-         "children": angle_children},
-        {"type": "toggle", "toggle": {"rich_text": _plain_rt("鏡位"), "color": "yellow_background"},
-         "children": position_children},
-        {"type": "bulleted_list_item", "bulleted_list_item": {"rich_text": _label_value_rt("動作描述", row["action"])}},
-        {"type": "bulleted_list_item", "bulleted_list_item": {"rich_text": _label_value_rt("對白/字卡文案", row["line"])}},
-        {"type": "bulleted_list_item", "bulleted_list_item": {"rich_text": _label_value_rt("秒數", row["seconds"])}},
-    ]
+    _append_children(shot_created_blocks[1]["id"], angle_children, token)
+    _append_children(shot_created_blocks[2]["id"], position_children, token)
 
 
 def _new_scene_blocks(scene_id, srows):
@@ -271,6 +284,7 @@ def _sync_existing_scene(page_id, scene_idx, srows, token):
             last_id = shot["seconds"]["id"]  # 這個鏡頭區塊裡最後一塊，後面如果要插入新鏡頭要接在這之後
         else:
             appended = _append_children(page_id, _new_shot_blocks(shot_no, row), token, after=last_id)
+            _populate_shot_toggles(appended, angle_val, pos_val, token)
             last_id = appended[-1]["id"]
 
     for shot_no, shot in scene_idx["shots"].items():
@@ -323,6 +337,11 @@ def expand_to_detail(page_id, token):
         else:
             appended = _append_children(page_id, _new_scene_blocks(sid, srows), token, after=append_anchor)
             append_anchor = appended[-1]["id"]
+            for i, row in enumerate(srows):
+                start = SCENE_HEADER_BLOCK_COUNT + i * SHOT_BLOCK_COUNT
+                shot_slice = appended[start:start + SHOT_BLOCK_COUNT]
+                angle_val, pos_val = _detect_for_row(row)
+                _populate_shot_toggles(shot_slice, angle_val, pos_val, token)
 
     for sid, scene_idx in existing.items():
         if sid not in scene_rows:

@@ -26,6 +26,9 @@ app = Flask(__name__)
 NOTION_TOKEN = os.environ["NOTION_TOKEN"]
 WEBHOOK_SECRET = os.environ["WEBHOOK_SECRET"]
 
+# 最後一頁「素材規範」的示意圖，公司固定樣板、每份分鏡腳本都附一樣的圖，不隨專案改變
+SPEC_IMG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "素材規範頁.png")
+
 
 def _get_param(name):
     """相容兩種來源：陽春版 Notion 按鈕只能帶查詢參數/自訂標頭，沒有 Body 可用；
@@ -64,7 +67,7 @@ def _do_generate(page_id, title):
         materialize_images(data, tmp)
         out_name = f"{data['meta']['素材名稱']}_分鏡腳本.pptx"
         out_path = os.path.join(tmp, out_name)
-        build_pptx(data, out_path, base_dir=tmp)
+        build_pptx(data, out_path, base_dir=tmp, spec_img=SPEC_IMG)
         upload_file_to_page(page_id, NOTION_TOKEN, out_path, out_name)
 
 

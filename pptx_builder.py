@@ -507,7 +507,7 @@ def build_pptx(data, out_path, base_dir=".", spec_img=None):
         if spec is None and spec_img and os.path.exists(spec_img):
             add_picture_fit(slide, spec_img, spec_col_x[2], y, spec_col_w[2], h)
         else:
-            txbox(slide, spec_col_x[2], y, spec_col_w[2], h, spec, size=10, color=BLACK)
+            txbox(slide, spec_col_x[2], y, spec_col_w[2], h, spec or "", size=10, color=BLACK)
         txbox(slide, spec_col_x[3], y, spec_col_w[3], h, note, size=10)
         y += h
 

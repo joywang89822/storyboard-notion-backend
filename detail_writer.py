@@ -118,7 +118,7 @@ def _index_scenes(scene_blocks):
         if m:
             cur_shot = {
                 "marker_id": b["id"], "angle_toggle": None, "position_toggle": None,
-                "action_id": None, "line_id": None, "seconds_id": None,
+                "action": None, "line": None, "seconds": None,
             }
             cur["shots"][m.group(1)] = cur_shot
             continue
@@ -133,12 +133,14 @@ def _index_scenes(scene_blocks):
             elif title.startswith("鏡位"):
                 cur_shot["position_toggle"] = _index_toggle(b)
         elif t in ("paragraph", "bulleted_list_item"):
+            # 範本裡這幾個欄位實際上是 bulleted_list_item（有項目符號），不是 paragraph，
+            # 所以要記住這個區塊「原本的類型」，PATCH 時才不會送錯 key 被 Notion 判 400
             if text.startswith("動作描述"):
-                cur_shot["action_id"] = b["id"]
+                cur_shot["action"] = {"id": b["id"], "type": t}
             elif text.startswith("對白/字卡文案"):
-                cur_shot["line_id"] = b["id"]
+                cur_shot["line"] = {"id": b["id"], "type": t}
             elif text.startswith("秒數"):
-                cur_shot["seconds_id"] = b["id"]
+                cur_shot["seconds"] = {"id": b["id"], "type": t}
 
     for sc in scenes.values():
         sc["last_id"] = sc["all_ids"][-1]
@@ -173,9 +175,9 @@ def _new_shot_blocks(shot_no, row):
          "children": angle_children},
         {"type": "toggle", "toggle": {"rich_text": _plain_rt("鏡位"), "color": "yellow_background"},
          "children": position_children},
-        {"type": "paragraph", "paragraph": {"rich_text": _label_value_rt("動作描述", row["action"])}},
-        {"type": "paragraph", "paragraph": {"rich_text": _label_value_rt("對白/字卡文案", row["line"])}},
-        {"type": "paragraph", "paragraph": {"rich_text": _label_value_rt("秒數", row["seconds"])}},
+        {"type": "bulleted_list_item", "bulleted_list_item": {"rich_text": _label_value_rt("動作描述", row["action"])}},
+        {"type": "bulleted_list_item", "bulleted_list_item": {"rich_text": _label_value_rt("對白/字卡文案", row["line"])}},
+        {"type": "bulleted_list_item", "bulleted_list_item": {"rich_text": _label_value_rt("秒數", row["seconds"])}},
     ]
 
 
@@ -184,8 +186,8 @@ def _new_scene_blocks(scene_id, srows):
         {"type": "heading_2", "heading_2": {"rich_text": _plain_rt(f"分鏡 {scene_id}")}},
         {"type": "bulleted_list_item", "bulleted_list_item": {
             "rich_text": _label_value_rt("場景/道具（跟前一鏡相同可直接寫「同前一cut」）", "")}},
-        {"type": "paragraph", "paragraph": {"rich_text": _label_value_rt("音樂", "")}},
-        {"type": "paragraph", "paragraph": {"rich_text": _label_value_rt("音效", "")}},
+        {"type": "bulleted_list_item", "bulleted_list_item": {"rich_text": _label_value_rt("音樂", "")}},
+        {"type": "bulleted_list_item", "bulleted_list_item": {"rich_text": _label_value_rt("音效", "")}},
     ]
     for i, row in enumerate(srows, start=1):
         blocks.extend(_new_shot_blocks(row["shot_no"] or str(i), row))
@@ -206,6 +208,10 @@ def _sync_toggle(toggle_idx, options, checked_value, token):
             _patch_block(toggle_idx["todo_ids"][opt], {"to_do": {"checked": opt == checked_value}}, token)
 
 
+def _patch_field(field, label, value, token):
+    _patch_block(field["id"], {field["type"]: {"rich_text": _label_value_rt(label, value)}}, token)
+
+
 def _sync_existing_scene(page_id, scene_idx, srows, token):
     used = set()
     last_id = scene_idx["last_id"]
@@ -220,10 +226,10 @@ def _sync_existing_scene(page_id, scene_idx, srows, token):
             shot = scene_idx["shots"][shot_no]
             _sync_toggle(shot["angle_toggle"], angle_matcher.ANGLE_OPTIONS, angle_val, token)
             _sync_toggle(shot["position_toggle"], angle_matcher.POSITION_OPTIONS, pos_val, token)
-            _patch_block(shot["action_id"], {"paragraph": {"rich_text": _label_value_rt("動作描述", row["action"])}}, token)
-            _patch_block(shot["line_id"], {"paragraph": {"rich_text": _label_value_rt("對白/字卡文案", row["line"])}}, token)
-            _patch_block(shot["seconds_id"], {"paragraph": {"rich_text": _label_value_rt("秒數", row["seconds"])}}, token)
-            last_id = shot["seconds_id"]  # 這個鏡頭區塊裡最後一塊，後面如果要插入新鏡頭要接在這之後
+            _patch_field(shot["action"], "動作描述", row["action"], token)
+            _patch_field(shot["line"], "對白/字卡文案", row["line"], token)
+            _patch_field(shot["seconds"], "秒數", row["seconds"], token)
+            last_id = shot["seconds"]["id"]  # 這個鏡頭區塊裡最後一塊，後面如果要插入新鏡頭要接在這之後
         else:
             appended = _append_children(page_id, _new_shot_blocks(shot_no, row), token, after=last_id)
             last_id = appended[-1]["id"]
@@ -232,7 +238,7 @@ def _sync_existing_scene(page_id, scene_idx, srows, token):
         if shot_no in used:
             continue
         for bid in [shot["marker_id"], shot["angle_toggle"]["id"], shot["position_toggle"]["id"],
-                    shot["action_id"], shot["line_id"], shot["seconds_id"]]:
+                    shot["action"]["id"], shot["line"]["id"], shot["seconds"]["id"]]:
             _delete_block(bid, token)
 
 

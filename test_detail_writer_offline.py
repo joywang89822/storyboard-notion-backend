@@ -53,15 +53,17 @@ def table(rows, id_=None):
 
 def full_shot(shot_no, angle_checked, position_options, action_text, line_text="", seconds_text="1s", ids=None):
     ids = ids or {}
+    # 範本裡「動作描述/對白/字卡文案/秒數」實際上是 bulleted_list_item（項目符號），不是 paragraph；
+    # 這裡故意跟真實頁面一樣用 bullet()，這樣才測得出 detail_writer 送錯 block type 的問題
     marker = para(f"鏡頭 {shot_no}：", id_=ids.get("marker"))
     angle_children = [todo(opt, opt == angle_checked, id_=ids.get(f"a_{opt}")) for opt in dw.angle_matcher.ANGLE_OPTIONS]
     angle_children.append(todo("其他：", False))
     angle_tg = toggle("角度/運鏡", angle_children, id_=ids.get("angle_tg"))
     pos_children = [todo(opt, False, id_=ids.get(f"p_{opt}")) for opt in position_options]
     pos_tg = toggle("鏡位", pos_children, id_=ids.get("pos_tg"))
-    action = para(f"動作描述：{action_text}", id_=ids.get("action"))
-    line = para(f"對白/字卡文案：{line_text}", id_=ids.get("line"))
-    seconds = para(f"秒數：{seconds_text}", id_=ids.get("seconds"))
+    action = bullet(f"動作描述：{action_text}", id_=ids.get("action"))
+    line = bullet(f"對白/字卡文案：{line_text}", id_=ids.get("line"))
+    seconds = bullet(f"秒數：{seconds_text}", id_=ids.get("seconds"))
     return [marker, angle_tg, pos_tg, action, line, seconds]
 
 
@@ -122,10 +124,12 @@ dw.expand_to_detail("fake_page_id", "fake_token")
 
 # ---- 檢查結果 ----
 
-# 1) 分鏡1鏡頭1 是既有鏡頭：動作文字要被覆蓋更新
+# 1) 分鏡1鏡頭1 是既有鏡頭：動作文字要被覆蓋更新，而且要送對 block type（bulleted_list_item，
+#    不是 paragraph）—曾經送錯過 key，被 Notion 判 400
 action_patches = [p for bid, p in calls["patch"] if bid == scene1_shot1[3]["id"]]
 assert len(action_patches) == 1
-assert action_patches[0]["paragraph"]["rich_text"][-1]["text"]["content"] == "主角俯視看牌", action_patches[0]
+assert "bulleted_list_item" in action_patches[0], action_patches[0]
+assert action_patches[0]["bulleted_list_item"]["rich_text"][-1]["text"]["content"] == "主角俯視看牌", action_patches[0]
 
 # 2) 角度/運鏡勾選要更新成「俯視」：「平視」被取消勾選、「俯視」被勾選
 angle_todo_ids = {c["type"] if False else None: None}  # noop，避免 lint 抱怨未用變數
@@ -149,6 +153,11 @@ new_shot_appends = [
     )
 ]
 assert len(new_shot_appends) == 1, calls["append"]
+
+# 4a) 新鏡頭的動作/對白/秒數也要建成 bulleted_list_item，跟範本現有格式一致
+for _, _, children in new_shot_appends:
+    label_blocks = [b for b in children if b.get("type") == "bulleted_list_item"]
+    assert len(label_blocks) == 3, children  # 動作描述、對白/字卡文案、秒數
 
 # 4b) Notion API 規定巢狀 children 要跟 "toggle"/"type" 同一層，不能塞在 "toggle" 裡面 —
 #     這裡曾經寫錯過（塞進 toggle 物件內），會被 Notion 判成 400 Bad Request

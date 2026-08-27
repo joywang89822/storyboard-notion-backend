@@ -52,9 +52,8 @@ def table(rows, id_=None):
 
 
 def full_shot(shot_no, angle_checked, position_options, action_text, line_text="", seconds_text="1s", ids=None):
+    """舊版排版：勾選是 toggle，動作/對白/秒數是各自獨立的 bulleted_list_item（項目符號）。"""
     ids = ids or {}
-    # 範本裡「動作描述/對白/字卡文案/秒數」實際上是 bulleted_list_item（項目符號），不是 paragraph；
-    # 這裡故意跟真實頁面一樣用 bullet()，這樣才測得出 detail_writer 送錯 block type 的問題
     marker = para(f"鏡頭 {shot_no}：", id_=ids.get("marker"))
     angle_children = [todo(opt, opt == angle_checked, id_=ids.get(f"a_{opt}")) for opt in dw.angle_matcher.ANGLE_OPTIONS]
     angle_children.append(todo("其他：", False))
@@ -67,27 +66,62 @@ def full_shot(shot_no, angle_checked, position_options, action_text, line_text="
     return [marker, angle_tg, pos_tg, action, line, seconds]
 
 
+def column(children, id_=None):
+    return {"id": id_ or new_id("col"), "type": "column", "column": {}, "_children": children}
+
+
+def column_list(label, option_columns, id_=None):
+    return {"id": id_ or new_id("cl"), "type": "column_list", "column_list": {},
+            "_children": [column([para(label)])] + option_columns}
+
+
+def option_column(text, checked, id_=None):
+    return column([todo(text, checked, id_=id_)])
+
+
+def full_shot_new(shot_no, angle_checked, position_options, action_text, line_text="", seconds_text="1s", ids=None):
+    """新版排版：勾選改成 columns 並排，動作/對白/秒數合併成一個表格（表頭列 + 一列資料）。"""
+    ids = ids or {}
+    marker = para(f"鏡頭 {shot_no}：", id_=ids.get("marker"))
+    angle_opts = [option_column(opt, opt == angle_checked, id_=ids.get(f"a_{opt}")) for opt in dw.angle_matcher.ANGLE_OPTIONS]
+    angle_opts.append(option_column("其他：", False))
+    angle_cl = column_list("角度/運鏡", angle_opts, id_=ids.get("angle_cl"))
+    pos_opts = [option_column(opt, False, id_=ids.get(f"p_{opt}")) for opt in position_options]
+    pos_cl = column_list("鏡位", pos_opts, id_=ids.get("pos_cl"))
+    tbl = table([
+        table_row(["動作描述", "對白/字卡文案", "秒數"], id_=ids.get("table_header")),
+        table_row([action_text, line_text, seconds_text], id_=ids.get("table_row")),
+    ], id_=ids.get("table"))
+    return [marker, angle_cl, pos_cl, tbl]
+
+
 # ---- 組一顆假頁面 ----
-# 上方文字表格：分鏡1鏡頭1（既有，動作改了）、分鏡1鏡頭2（既有場景的新鏡頭）、分鏡2（全新分鏡）
+# 上方文字表格：分鏡1鏡頭1（既有舊格式，動作改了）、分鏡1鏡頭2（既有場景的新鏡頭）、
+# 分鏡2（全新分鏡）、分鏡4鏡頭1（既有新格式，動作改了）
 summary_table = table([
     table_row(["分鏡", "鏡頭", "秒數", "鏡位", "動作", "對白/文案"]),
     table_row(["1", "1", "1s", "", "主角俯視看牌", ""]),
     table_row(["1", "2", "2s", "", "特寫拍攝金幣", "三條"]),
     table_row(["2", "1", "3s", "全景", "中撲jingle", ""]),
+    table_row(["4", "1", "1.5s", "", "主角俯視看牌", "換過的對白"]),
     table_row(["總秒數", "", "99s", "", "", ""], id_="total_row"),  # 故意放錯的舊值，驗證會被重算覆蓋
 ])
 
-# 下方「分鏡內容」：分鏡1鏡頭1既有（動作是舊文字，鏡位 toggle 只有 3 個選項，沒有「特寫」）
+# 下方「分鏡內容」：分鏡1鏡頭1既有（舊格式，動作是舊文字，鏡位 toggle 只有 3 個選項，沒有「特寫」）
 scene1_shot1 = full_shot("1", "平視", ["全景", "近景", "中景"], "舊的動作文字")
 scene1 = [h2("分鏡 1")] + [bullet("場景/道具：")] + [para("音樂："), para("音效：")] + scene1_shot1
 
-# 分鏡3：上方表格沒有提到，應該整段被刪除
+# 分鏡3：上方表格沒有提到，應該整段被刪除（沿用舊格式，確認刪除邏輯新舊格式都適用）
 scene3_shot1 = full_shot("1", "仰視", ["全景", "近景", "中景"], "會被刪除的舊分鏡")
 scene3 = [h2("分鏡 3")] + [bullet("場景/道具：")] + [para("音樂："), para("音效：")] + scene3_shot1 + [divider()]
 
+# 分鏡4：既有鏡頭已經是新格式（columns + 表格），驗證既有的新格式鏡頭也能正確被同步覆蓋
+scene4_shot1 = full_shot_new("1", "平視", ["全景", "近景", "中景", "特寫"], "舊的動作文字", "舊對白")
+scene4 = [h2("分鏡 4")] + [bullet("場景/道具：")] + [para("音樂："), para("音效：")] + scene4_shot1 + [divider()]
+
 trailing_button = {"id": "btn1", "type": "unsupported", "unsupported": {}, "_children": []}
 
-page_tree = [summary_table, h1("分鏡內容")] + scene1 + scene3 + [trailing_button]
+page_tree = [summary_table, h1("分鏡內容")] + scene1 + scene3 + scene4 + [trailing_button]
 
 # ---- monkeypatch 掉所有會真的打 API 的函式 ----
 calls = {"patch": [], "append": [], "delete": []}
@@ -144,7 +178,8 @@ pos_tg_id = scene1_shot1[2]["id"]
 appended_into_pos_tg = [c for parent, after, children, results in calls["append"] if parent == pos_tg_id for c in children]
 assert any(c["to_do"]["rich_text"][0]["text"]["content"] == "特寫" for c in appended_into_pos_tg), appended_into_pos_tg
 
-# 4) 分鏡1鏡頭2 是新鏡頭：應該被 append 到分鏡1底下（parent 是 page_id，不是某個 toggle）
+# 4) 分鏡1鏡頭2 是新鏡頭：應該被 append 到分鏡1底下（parent 是 page_id，不是某個 toggle），
+#    新建的鏡頭要用新排版（columns 勾選 + 表格），不是舊的 toggle + bulleted_list_item
 new_shot_appends = [
     (parent, after, children, results) for parent, after, children, results in calls["append"]
     if parent == "fake_page_id" and any(
@@ -154,27 +189,26 @@ new_shot_appends = [
 ]
 assert len(new_shot_appends) == 1, calls["append"]
 
-# 4a) 新鏡頭的動作/對白/秒數也要建成 bulleted_list_item，跟範本現有格式一致
+# 4a) 新鏡頭要建成：1 個 paragraph（鏡頭標記）+ 2 個 column_list（角度/運鏡、鏡位）+ 1 個 table
+#     （動作描述/對白/字卡文案/秒數），不再是舊版的 toggle + 3 個 bulleted_list_item
 for _, _, children, _ in new_shot_appends:
-    label_blocks = [b for b in children if b.get("type") == "bulleted_list_item"]
-    assert len(label_blocks) == 3, children  # 動作描述、對白/字卡文案、秒數
+    types = [b.get("type") for b in children]
+    assert types == ["paragraph", "column_list", "column_list", "table"], types
 
-# 4b) 建立 toggle 當下絕對不能帶巢狀 children —— Notion API 對「新建 toggle 同時塞巢狀
-#     children」這個組合有時候會回 400 body validation 錯誤（原因抓不出來），已經改成兩段式：
-#     先建空 toggle，事後再用另一次 append 把打勾選項塞進去
-for _, _, children, results in new_shot_appends:
+# 4b) column_list 建立當下就要直接帶巢狀 children（不像舊版 toggle 要事後兩段式補打勾選項）
+for _, _, children, _ in new_shot_appends:
     for b in children:
-        if b.get("type") == "toggle":
-            assert "children" not in b, "toggle 不該在建立當下就帶 children，要事後另外 append"
-    # 4c) 這兩個新建的 toggle，事後應該各自有一次 append_children 把選項塞進去
-    toggle_ids = [r["id"] for r, b in zip(results, children) if b.get("type") == "toggle"]
-    assert len(toggle_ids) == 2, results
-    for tid in toggle_ids:
-        populated = [c for parent, after, ch, res in calls["append"] if parent == tid for c in ch]
-        assert populated, f"toggle {tid} 事後沒有被塞入打勾選項"
-        assert all(c.get("type") == "to_do" for c in populated), populated
+        if b.get("type") == "column_list":
+            assert b["column_list"]["children"], "column_list 建立當下就該帶巢狀 children"
 
-# 5) 分鏡2 是全新分鏡：應該被 append 到 page 底下，且用「中撲jingle」當動作文字
+# 4c) 表格的第二列（資料列）要是這次表格填的動作/對白/秒數
+for _, _, children, _ in new_shot_appends:
+    tbl = next(b for b in children if b.get("type") == "table")
+    data_row = tbl["table"]["children"][1]
+    cells_text = [c[0]["text"]["content"] if c else "" for c in data_row["table_row"]["cells"]]
+    assert cells_text == ["特寫拍攝金幣", "三條", "2s"], cells_text
+
+# 5) 分鏡2 是全新分鏡：應該被 append 到 page 底下，且用「中撲jingle」當動作文字，一樣是新排版
 new_scene_appends = [
     (parent, after, children, results) for parent, after, children, results in calls["append"]
     if parent == "fake_page_id" and any(
@@ -184,13 +218,13 @@ new_scene_appends = [
 ]
 assert len(new_scene_appends) == 1, calls["append"]
 
-# 5a) 分鏡2 裡新建的兩個 toggle（鏡頭1的角度/鏡位），事後也要各自被補上打勾選項
-for _, _, children, results in new_scene_appends:
-    toggle_ids = [r["id"] for r, b in zip(results, children) if b.get("type") == "toggle"]
-    assert len(toggle_ids) == 2, results
-    for tid in toggle_ids:
-        populated = [c for parent, after, ch, res in calls["append"] if parent == tid for c in ch]
-        assert populated, f"toggle {tid} 事後沒有被塞入打勾選項"
+for _, _, children, _ in new_scene_appends:
+    column_lists = [b for b in children if b.get("type") == "column_list"]
+    assert len(column_lists) == 2, children  # 角度/運鏡、鏡位
+    tbl = next(b for b in children if b.get("type") == "table")
+    data_row = tbl["table"]["children"][1]
+    cells_text = [c[0]["text"]["content"] if c else "" for c in data_row["table_row"]["cells"]]
+    assert cells_text == ["中撲jingle", "", "3s"], cells_text
 
 # 6) 分鏡3 在上方表格已經不存在：整段（含鏡頭6個區塊+divider+heading等）應該被刪除，
 #    但緊接在它後面、我們認不得的按鈕區塊絕對不能被刪掉
@@ -198,9 +232,24 @@ scene3_ids = {b["id"] for b in scene3}
 assert scene3_ids.issubset(set(calls["delete"])), (scene3_ids, calls["delete"])
 assert "btn1" not in calls["delete"]
 
-# 7) 總秒數要順便被重算：1s+2s+3s=6s，蓋掉表格裡原本錯的 99s
+# 7) 分鏡4鏡頭1 是既有的「新排版」鏡頭（columns + 表格）：也要能正確被同步覆蓋，不是只有
+#    舊排版能同步——動作文字要被 patch 進表格資料列，角度勾選要從「平視」改成「俯視」
+scene4_data_row_id = scene4_shot1[3]["_children"][1]["id"]
+table_patches = [p for bid, p in calls["patch"] if bid == scene4_data_row_id]
+assert len(table_patches) == 1, calls["patch"]
+patched_cells = [c[0]["text"]["content"] if c else "" for c in table_patches[0]["table_row"]["cells"]]
+assert patched_cells == ["主角俯視看牌", "換過的對白", "1.5s"], patched_cells
+
+scene4_angle_columns = scene4_shot1[1]["_children"][1:]  # 跳過第一欄（標籤）
+by_label4 = {c["_children"][0]["to_do"]["rich_text"][0]["plain_text"]: c["_children"][0]["id"]
+             for c in scene4_angle_columns}
+patched_ids = {bid: p for bid, p in calls["patch"]}
+assert patched_ids[by_label4["平視"]]["to_do"]["checked"] is False
+assert patched_ids[by_label4["俯視"]]["to_do"]["checked"] is True
+
+# 8) 總秒數要順便被重算：1s+2s+3s+1.5s=7.5s，蓋掉表格裡原本錯的 99s
 total_patches = [p for bid, p in calls["patch"] if bid == "total_row"]
 assert len(total_patches) == 1, calls["patch"]
-assert total_patches[0]["table_row"]["cells"][2][0]["text"]["content"] == "6s", total_patches[0]
+assert total_patches[0]["table_row"]["cells"][2][0]["text"]["content"] == "7.5s", total_patches[0]
 
 print("ALL ASSERTIONS PASSED")

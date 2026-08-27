@@ -20,13 +20,13 @@ import sys
 import requests
 
 import angle_matcher
-from notion_parser import _headers, _text, _rt_plain, API, fetch_tree
+from notion_parser import _headers, _text, _rt_plain, _column_list_label, API, fetch_tree
 from summary import _find_first_table
 
 CONTENT_HEADING = "分鏡內容"
 KNOWN_TOP_LEVEL_TYPES = {
     "heading_1", "heading_2", "heading_3", "paragraph", "bulleted_list_item",
-    "toggle", "divider", "quote", "callout", "table",
+    "toggle", "column_list", "divider", "quote", "callout", "table",
 }
 
 
@@ -129,6 +129,17 @@ def _index_toggle(block):
     return {"id": block["id"], "todo_ids": todo_ids}
 
 
+def _index_columns_checkboxes(column_list_block):
+    """新版排版：勾選改成 columns 並排，不是 toggle。把非標籤欄的 to_do 攤平成跟 _index_toggle
+    一樣的形狀（{id, todo_ids}），這樣 _sync_toggle 可以兩種排版共用同一份邏輯。"""
+    todo_ids = {}
+    for col in column_list_block.get("_children", [])[1:]:
+        for c in col.get("_children", []):
+            if c.get("type") == "to_do":
+                todo_ids[_text(c).strip()] = c["id"]
+    return {"id": column_list_block["id"], "todo_ids": todo_ids}
+
+
 def _index_scenes(scene_blocks):
     scenes = {}
     cur = None
@@ -157,7 +168,7 @@ def _index_scenes(scene_blocks):
         if m:
             cur_shot = {
                 "marker_id": b["id"], "angle_toggle": None, "position_toggle": None,
-                "action": None, "line": None, "seconds": None,
+                "action": None, "line": None, "seconds": None, "table": None,
             }
             cur["shots"][m.group(1)] = cur_shot
             continue
@@ -171,8 +182,19 @@ def _index_scenes(scene_blocks):
                 cur_shot["angle_toggle"] = _index_toggle(b)
             elif title.startswith("鏡位"):
                 cur_shot["position_toggle"] = _index_toggle(b)
+        elif t == "column_list":
+            label = _column_list_label(b)
+            if label.startswith("角度/運鏡"):
+                cur_shot["angle_toggle"] = _index_columns_checkboxes(b)
+            elif label.startswith("鏡位"):
+                cur_shot["position_toggle"] = _index_columns_checkboxes(b)
+        elif t == "table":
+            # 新版排版：動作描述/對白/字卡文案/秒數合併成一個表格（表頭列 + 一列資料）
+            rows = b.get("_children", [])
+            if len(rows) >= 2:
+                cur_shot["table"] = {"id": b["id"], "data_row_id": rows[1]["id"]}
         elif t in ("paragraph", "bulleted_list_item"):
-            # 範本裡這幾個欄位實際上是 bulleted_list_item（有項目符號），不是 paragraph，
+            # 舊版排版這幾個欄位實際上是 bulleted_list_item（有項目符號），不是 paragraph，
             # 所以要記住這個區塊「原本的類型」，PATCH 時才不會送錯 key 被 Notion 判 400
             if text.startswith("動作描述"):
                 cur_shot["action"] = {"id": b["id"], "type": t}
@@ -193,44 +215,53 @@ def _last_content_block_id(tree):
     return tree[-1]["id"] if tree else None
 
 
-SCENE_HEADER_BLOCK_COUNT = 4  # heading + 場景/道具 + 音樂 + 音效
-SHOT_BLOCK_COUNT = 6  # marker + 角度/運鏡 toggle + 鏡位 toggle + 動作描述 + 對白/字卡文案 + 秒數
-
-
 def _detect_for_row(row):
     combined = f"{row['position_text']} {row['action']}"
     return angle_matcher.detect_angle(combined), angle_matcher.detect_position(combined)
 
 
+def _checkbox_columns_block(label, options, checked_value, extra_options=None):
+    """建一個新排版的 columns 勾選區塊：第一欄是欄位名稱，其餘每欄各放一個 to_do 選項。
+    跟舊版 toggle 不同，column_list 建立當下直接帶巢狀 children（含打勾狀態）就很穩定，
+    不需要像舊版 toggle 那樣「先建空的、事後再補打勾選項」的兩段式寫法。"""
+    columns = [
+        {"type": "column", "column": {"children": [
+            {"type": "paragraph", "paragraph": {"rich_text": _plain_rt(label, bold=True)}},
+        ]}},
+    ]
+    for opt in options:
+        columns.append({"type": "column", "column": {"children": [
+            {"type": "to_do", "to_do": {"rich_text": _plain_rt(opt), "checked": opt == checked_value}},
+        ]}})
+    for opt in extra_options or []:
+        columns.append({"type": "column", "column": {"children": [
+            {"type": "to_do", "to_do": {"rich_text": _plain_rt(opt), "checked": False}},
+        ]}})
+    return {"type": "column_list", "column_list": {"children": columns}}
+
+
+def _shot_table_block(row):
+    header = {"type": "table_row", "table_row": {"cells": [
+        _cell_rt("動作描述"), _cell_rt("對白/字卡文案"), _cell_rt("秒數"),
+    ]}}
+    data = {"type": "table_row", "table_row": {"cells": [
+        _cell_rt(row["action"]), _cell_rt(row["line"]), _cell_rt(row["seconds"]),
+    ]}}
+    return {"type": "table", "table": {
+        "table_width": 3, "has_column_header": True, "has_row_header": False,
+        "children": [header, data],
+    }}
+
+
 def _new_shot_blocks(shot_no, row):
-    """故意不在建立 toggle 的同一次請求裡帶 children（打勾選項）：Notion API 對「新建 toggle
-    同時塞巢狀 children」這個組合有時候會回 400 body validation 錯誤，原因抓不出來，但「先建立
-    空 toggle，另外用一次 append 把選項塞進去」這個兩段式寫法一直都穩定，所以統一改用這個方式，
-    交給 _populate_shot_toggles 事後補打勾選項。"""
     marker = f"鏡頭 {shot_no}：" if shot_no == "1" else f"鏡頭 {shot_no}（沒有可刪除）："
+    angle_val, pos_val = _detect_for_row(row)
     return [
         {"type": "paragraph", "paragraph": {"rich_text": _plain_rt(marker, bold=True)}},
-        {"type": "toggle", "toggle": {"rich_text": _plain_rt("角度/運鏡"), "color": "yellow_background"}},
-        {"type": "toggle", "toggle": {"rich_text": _plain_rt("鏡位"), "color": "yellow_background"}},
-        {"type": "bulleted_list_item", "bulleted_list_item": {"rich_text": _label_value_rt("動作描述", row["action"])}},
-        {"type": "bulleted_list_item", "bulleted_list_item": {"rich_text": _label_value_rt("對白/字卡文案", row["line"])}},
-        {"type": "bulleted_list_item", "bulleted_list_item": {"rich_text": _label_value_rt("秒數", row["seconds"])}},
+        _checkbox_columns_block("角度/運鏡", angle_matcher.ANGLE_OPTIONS, angle_val, extra_options=["其他："]),
+        _checkbox_columns_block("鏡位", angle_matcher.POSITION_OPTIONS, pos_val),
+        _shot_table_block(row),
     ]
-
-
-def _populate_shot_toggles(shot_created_blocks, angle_val, pos_val, token):
-    """shot_created_blocks：剛剛建立好、已經有真實 id 的 6 個區塊，順序跟 _new_shot_blocks
-    回傳的一樣（index 1 = 角度/運鏡 toggle，index 2 = 鏡位 toggle）。"""
-    angle_children = [
-        {"type": "to_do", "to_do": {"rich_text": _plain_rt(opt), "checked": opt == angle_val}}
-        for opt in angle_matcher.ANGLE_OPTIONS
-    ] + [{"type": "to_do", "to_do": {"rich_text": _plain_rt("其他："), "checked": False}}]
-    position_children = [
-        {"type": "to_do", "to_do": {"rich_text": _plain_rt(opt), "checked": opt == pos_val}}
-        for opt in angle_matcher.POSITION_OPTIONS
-    ]
-    _append_children(shot_created_blocks[1]["id"], angle_children, token)
-    _append_children(shot_created_blocks[2]["id"], position_children, token)
 
 
 def _new_scene_blocks(scene_id, srows):
@@ -264,7 +295,14 @@ def _patch_field(field, label, value, token):
     _patch_block(field["id"], {field["type"]: {"rich_text": _label_value_rt(label, value)}}, token)
 
 
+def _patch_table_row(table_info, row, token):
+    new_cells = [_cell_rt(row["action"]), _cell_rt(row["line"]), _cell_rt(row["seconds"])]
+    _patch_block(table_info["data_row_id"], {"table_row": {"cells": new_cells}}, token)
+
+
 def _sync_existing_scene(page_id, scene_idx, srows, token):
+    """既有鏡頭新舊排版都要能同步：新版是 columns 勾選 + 表格（action/line/seconds 合一），
+    舊版是 toggle 勾選 + 三個獨立文字欄位；用哪種排版由 _index_scenes 記錄下來的區塊類型決定。"""
     used = set()
     last_id = scene_idx["last_id"]
     for i, row in enumerate(srows, start=1):
@@ -276,22 +314,33 @@ def _sync_existing_scene(page_id, scene_idx, srows, token):
 
         if shot_no in scene_idx["shots"]:
             shot = scene_idx["shots"][shot_no]
-            _sync_toggle(shot["angle_toggle"], angle_matcher.ANGLE_OPTIONS, angle_val, token)
-            _sync_toggle(shot["position_toggle"], angle_matcher.POSITION_OPTIONS, pos_val, token)
-            _patch_field(shot["action"], "動作描述", row["action"], token)
-            _patch_field(shot["line"], "對白/字卡文案", row["line"], token)
-            _patch_field(shot["seconds"], "秒數", row["seconds"], token)
-            last_id = shot["seconds"]["id"]  # 這個鏡頭區塊裡最後一塊，後面如果要插入新鏡頭要接在這之後
+            if shot["angle_toggle"]:
+                _sync_toggle(shot["angle_toggle"], angle_matcher.ANGLE_OPTIONS, angle_val, token)
+            if shot["position_toggle"]:
+                _sync_toggle(shot["position_toggle"], angle_matcher.POSITION_OPTIONS, pos_val, token)
+            if shot["table"]:
+                _patch_table_row(shot["table"], row, token)
+                last_id = shot["table"]["id"]
+            else:
+                if shot["action"]:
+                    _patch_field(shot["action"], "動作描述", row["action"], token)
+                if shot["line"]:
+                    _patch_field(shot["line"], "對白/字卡文案", row["line"], token)
+                if shot["seconds"]:
+                    _patch_field(shot["seconds"], "秒數", row["seconds"], token)
+                    last_id = shot["seconds"]["id"]  # 這個鏡頭區塊裡最後一塊，後面插入新鏡頭要接在這之後
         else:
             appended = _append_children(page_id, _new_shot_blocks(shot_no, row), token, after=last_id)
-            _populate_shot_toggles(appended, angle_val, pos_val, token)
             last_id = appended[-1]["id"]
 
     for shot_no, shot in scene_idx["shots"].items():
         if shot_no in used:
             continue
-        for bid in [shot["marker_id"], shot["angle_toggle"]["id"], shot["position_toggle"]["id"],
-                    shot["action"]["id"], shot["line"]["id"], shot["seconds"]["id"]]:
+        ids = [shot["marker_id"]]
+        for key in ("angle_toggle", "position_toggle", "table", "action", "line", "seconds"):
+            if shot[key]:
+                ids.append(shot[key]["id"])
+        for bid in ids:
             _delete_block(bid, token)
 
 
@@ -337,11 +386,6 @@ def expand_to_detail(page_id, token):
         else:
             appended = _append_children(page_id, _new_scene_blocks(sid, srows), token, after=append_anchor)
             append_anchor = appended[-1]["id"]
-            for i, row in enumerate(srows):
-                start = SCENE_HEADER_BLOCK_COUNT + i * SHOT_BLOCK_COUNT
-                shot_slice = appended[start:start + SHOT_BLOCK_COUNT]
-                angle_val, pos_val = _detect_for_row(row)
-                _populate_shot_toggles(shot_slice, angle_val, pos_val, token)
 
     for sid, scene_idx in existing.items():
         if sid not in scene_rows:

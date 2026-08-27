@@ -133,42 +133,81 @@ def _find_toggle(blocks, title_prefix):
     return None
 
 
+def _find_heading(blocks, title_prefix):
+    """新版排版把「素材尺寸需求」這種區塊改成 toggle heading（heading_2 帶 is_toggleable），
+    不是 toggle 區塊，type 會是 heading_1/2/3。"""
+    for b in blocks:
+        if b.get("type") in ("heading_1", "heading_2", "heading_3") and _text(b).strip().startswith(title_prefix):
+            return b
+    return None
+
+
+def _column_list_label(block):
+    """columns 區塊第一欄放的是欄位名稱（例如「遊戲」「角度/運鏡」），取出它的純文字。"""
+    cols = block.get("_children", [])
+    if not cols:
+        return ""
+    return "".join(_text(c) for c in cols[0].get("_children", [])).strip()
+
+
+def _find_column_field(blocks, label_prefix):
+    """新版排版：勾選欄位改成 columns 並排（不是收合的 toggle），第一欄是欄位名稱，
+    其餘每一欄各放一個 to_do 選項。"""
+    for b in blocks:
+        if b.get("type") == "column_list" and _column_list_label(b).startswith(label_prefix):
+            return b
+    return None
+
+
+def _checked_todos_from_columns(column_list_block):
+    out = []
+    for col in column_list_block.get("_children", [])[1:]:
+        for c in col.get("_children", []):
+            if c.get("type") == "to_do" and c["to_do"].get("checked"):
+                out.append(_text(c).strip())
+    return out
+
+
+def _field_checked_options(blocks, label):
+    """同一個欄位新舊兩種排版都要看得懂：新版是 columns 並排勾選，舊版是 toggle 收合勾選清單。"""
+    col = _find_column_field(blocks, label)
+    if col is not None:
+        return [v for v in _checked_todos_from_columns(col) if not v.startswith("其他")]
+    tog = _find_toggle(blocks, label)
+    if tog is not None:
+        return [v for v in _checked_todos(tog["_children"]) if not v.startswith("其他")]
+    return []
+
+
 def parse_meta(meta_blocks):
     meta = {}
     for field in ["遊戲", "投放媒體", "單支秒數上限", "是否做長短秒", "素材類型", "影像特殊需求", "音效特殊需求"]:
-        tog = _find_toggle(meta_blocks, field)
-        if tog:
-            meta[field] = [v for v in _checked_todos(tog["_children"]) if not v.startswith("其他")]
+        meta[field] = _field_checked_options(meta_blocks, field)
 
-    # 素材尺寸需求：外層 toggle 底下還有一層 toggle（優先對稿尺寸 / Banner / Video / ...）
-    size_root = _find_toggle(meta_blocks, "素材尺寸需求")
+    # 素材尺寸需求：舊版是外層 toggle 底下再一層 toggle（優先對稿尺寸 / Banner / Video / ...），
+    # 新版是 toggle heading 底下一組 columns（每個尺寸類別一個 columns 區塊）。
+    size_root = _find_toggle(meta_blocks, "素材尺寸需求") or _find_heading(meta_blocks, "素材尺寸需求")
     sizes = {}
     priority = []
     if size_root:
-        for child in size_root["_children"]:
-            if child.get("type") != "toggle":
-                continue
-            title = _text(child).strip()
-            if title.startswith("優先對稿尺寸"):
-                priority = _checked_todos(child["_children"])
-            elif title.startswith("原始尺寸對照表"):
-                continue
-            else:
-                key = SIZE_CATEGORY_MAP.get(title)
-                if key:
-                    checked = _checked_todos(child["_children"])
-                    sizes.setdefault(key, [])
-                    sizes[key] = sorted(set(sizes[key]) | set(checked))
+        children = size_root.get("_children", [])
+        priority = _field_checked_options(children, "優先對稿尺寸")
+        for title, key in SIZE_CATEGORY_MAP.items():
+            checked = _field_checked_options(children, title)
+            if checked:
+                sizes.setdefault(key, [])
+                sizes[key] = sorted(set(sizes[key]) | set(checked))
     meta["素材尺寸"] = sizes
     meta["優先對稿尺寸"] = priority
 
-    # 自由文字欄位：段落文字是「標籤：內容」
+    # 自由文字欄位：段落文字是「標籤：內容」（label 比對時忽略「廣告 TA」這種標籤中間多打的空格）
     for b in meta_blocks:
         if b.get("type") not in ("paragraph", "bulleted_list_item"):
             continue
         full = _text(b)
+        full_nospace = full.replace(" ", "")
         for label in ["畫面風格", "配樂風格", "廣告TA", "廣告目的", "廣告鉤子"]:
-            if full.startswith(label):
+            if full_nospace.startswith(label):
                 _, _, val = full.partition("：")
                 meta[label] = val.strip()
     return meta
@@ -249,6 +288,25 @@ def parse_scenes(scene_blocks):
                 cur_shot["position"] = "、".join(checked)
             continue
 
+        if t == "column_list" and cur_shot is not None:
+            label = _column_list_label(b)
+            checked = [v for v in _checked_todos_from_columns(b) if not v.startswith("其他")]
+            if label.startswith("角度/運鏡"):
+                cur_shot["angle"] = "、".join(checked)
+            elif label.startswith("鏡位"):
+                cur_shot["position"] = "、".join(checked)
+            continue
+
+        if t == "table" and cur_shot is not None:
+            # 新版排版：動作描述/對白/字卡文案/秒數合併成一個表格（表頭列 + 一列資料）
+            rows = b.get("_children", [])
+            if len(rows) >= 2:
+                cells = rows[1].get("table_row", {}).get("cells", [])
+                vals = [_rt_plain(c) for c in cells]
+                vals += [""] * (3 - len(vals))
+                cur_shot["action"], cur_shot["line"], cur_shot["seconds"] = [v.strip() for v in vals[:3]]
+            continue
+
         if t in ("paragraph", "bulleted_list_item"):
             if text.startswith("場景/道具"):
                 for child in b.get("_children", []):
@@ -271,6 +329,19 @@ def parse_scenes(scene_blocks):
                     break
     flush_shot()
     return scenes
+
+
+def _flatten_meta_blocks(blocks):
+    """新版排版把「素材基本資訊」整個包成一個 toggle heading，欄位（columns/素材尺寸需求...）
+    變成它的巢狀 children，不再跟舊版一樣是同一層的 sibling。遞迴展開成扁平清單，
+    上面那些 _find_* 欄位搜尋函式才找得到。只展開「容器類」外層（heading／toggle），
+    column_list/table 內部結構固定，交給對應的 _find_* 函式自己去讀 children，不用打散。"""
+    out = []
+    for b in blocks:
+        out.append(b)
+        if b.get("type") in ("heading_1", "heading_2", "heading_3", "toggle"):
+            out.extend(_flatten_meta_blocks(b.get("_children", [])))
+    return out
 
 
 def fetch_page_title(page_id, token):
@@ -297,7 +368,7 @@ def parse_page(page_id, token, title=None, today_str=None):
         if b.get("type") == "heading_1" and _text(b).strip() == "分鏡內容":
             split_idx = i
             break
-    meta_blocks = tree[:split_idx] if split_idx is not None else tree
+    meta_blocks = _flatten_meta_blocks(tree[:split_idx] if split_idx is not None else tree)
     scene_blocks = tree[split_idx + 1:] if split_idx is not None else []
 
     meta = parse_meta(meta_blocks)

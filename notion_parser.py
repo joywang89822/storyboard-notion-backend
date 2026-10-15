@@ -355,7 +355,10 @@ def fetch_page_title(page_id, token):
     return ""
 
 
-def parse_page(page_id, token, title=None, today_str=None):
+def parse_page(page_id, token, title=None, today_str=None, source="table"):
+    """source="table"（產 PPTX 用）：以最上方文字腳本表格為準，下方完整版只當補充，並自動推測角度/鏡位；
+    頁面沒有文字腳本表格時自動退回讀下方完整版。
+    source="detail"（「更新摘要」用）：只讀下方完整版，維持舊行為。"""
     from datetime import date
     today_str = today_str or date.today().strftime("%Y%m%d")
     if title is None:
@@ -378,7 +381,16 @@ def parse_page(page_id, token, title=None, today_str=None):
     meta["總支數備註"] = note
 
     scenes = parse_scenes(scene_blocks)
-    return {"meta": meta, "scenes": scenes}
+    data = {"meta": meta, "scenes": scenes}
+    if source == "table":
+        import script_table
+        table = script_table.find_script_table(tree[:split_idx] if split_idx is not None else tree)
+        rows, cmap = script_table.read_rows(table) if table else ([], {})
+        if rows:
+            data["scenes"] = script_table.build_scenes(rows, scenes)
+            data["_script_table"] = (table, cmap)
+        script_table.enrich(data["scenes"], meta.get("影像特殊需求") or [])
+    return data
 
 
 if __name__ == "__main__":
@@ -388,4 +400,5 @@ if __name__ == "__main__":
     page_id = sys.argv[1]
     title = sys.argv[2] if len(sys.argv) > 2 else ""
     data = parse_page(page_id, token, title=title)
-    print(json.dumps(data, ensure_ascii=False, indent=2))
+    data.pop("_script_table", None)
+    print(json.dumps(data, ensure_ascii=False, indent=2, default=str))

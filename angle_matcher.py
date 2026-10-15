@@ -41,6 +41,87 @@ def _load():
 _ANGLE_MAP, _POSITION_MAP = _load()
 
 
+def _load_hints():
+    """「(推測)」類的列：動作描述沒寫明角度/鏡位時，從畫面內容推測。
+    回傳 [(角度或鏡位, 適用風格 or "", 選項, [關鍵字...]), ...]。
+    同一個鏡頭會依同事的習慣而不同（2D 遊戲畫面的跟注/All in 是特寫 UI，3D 的推籌碼是中景），
+    所以規則可以限定「適用風格」，空白 = 不分風格的通用規則。"""
+    hints = []
+    with open(CSV_PATH, encoding="utf-8-sig") as f:
+        for row in csv.DictReader(f):
+            category = (row.get("分類（角度/鏡位）") or "").strip()
+            if not category.endswith("(推測)"):
+                continue
+            target = (row.get("標準選項") or "").strip()
+            words = [s.strip() for s in (row.get("同義詞（腳本/口語常見寫法）") or "").split("、") if s.strip()]
+            if target and words:
+                hints.append((category.replace("(推測)", ""), (row.get("適用風格") or "").strip(), target, words))
+    return hints
+
+
+_HINTS = _load_hints()
+
+DEFAULT_ANGLE = "平視"
+DEFAULT_POSITION = "中景"
+STYLE_KEYS = ["2D", "3D", "真人"]
+
+
+def _hint(text, kind, style):
+    """先看這個風格專屬的規則，沒中再看通用規則；同一組規則裡取動作描述中「最先出現」的詞。"""
+    lowered = text.lower()
+    for scope in ([style] if style else []) + [""]:
+        best = None
+        for k, st, target, words in _HINTS:
+            if k != kind or st != scope:
+                continue
+            for w in words:
+                pos = lowered.find(w.lower()) if w.isascii() else text.find(w)
+                if pos != -1 and (best is None or pos < best[0]):
+                    best = (pos, target)
+        if best:
+            return best[1]
+    return None
+
+
+def style_of(styles):
+    """meta.影像特殊需求（例如 ["3D"]、["真人", "2D"]）→ 推測規則要用的風格。真人+2D 合成以真人為主。"""
+    styles = styles or []
+    for k in ["真人", "3D", "2D"]:
+        if k in styles:
+            return k
+    return ""
+
+
+def infer_shot(text, asset_position=None, style=""):
+    """沒有人工指定時，推測一個鏡頭的 (角度, 鏡位, 依據)。永遠回傳值，不會留空。
+
+    順序：動作描述裡明寫的詞（俯視/特寫…）> 內容推測（依風格，例如 2D 跟注→特寫、3D 推籌碼→中景）
+         > 配到的參考素材標註的鏡位 > 預設（平視、中景）
+    """
+    text = text or ""
+    angle = detect_angle(text)
+    position = detect_position(text)
+    source = "明寫" if (angle or position) else ""
+    if angle == "特寫推進" and not position:
+        position = "特寫"
+    if not position:
+        position = _hint(text, "鏡位", style)
+        if position:
+            source = source or "內容推測"
+    if not angle:
+        angle = _hint(text, "角度", style)
+    if not position and asset_position in POSITION_OPTIONS:
+        position, source = asset_position, source or "參考素材"
+    return angle or DEFAULT_ANGLE, position or DEFAULT_POSITION, source or "預設"
+
+
+def parse_cell(text):
+    """表格「鏡位」欄的人工填寫（例如「中景/俯視」「平視・全景」）→ (角度, 鏡位)，沒寫到的回傳 None。"""
+    if not text:
+        return None, None
+    return detect_angle(text), detect_position(text)
+
+
 def _find(text, keyword_map):
     lowered = text.lower()
     for syn, target in keyword_map:

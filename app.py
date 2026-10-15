@@ -19,7 +19,8 @@ from pptx_builder import build_pptx
 from summary import refresh_summary_table
 from file_upload import upload_file_to_page
 from images import materialize_images
-from detail_writer import expand_to_detail
+from detail_writer import expand_to_detail, _patch_block
+from script_table import write_back
 
 app = Flask(__name__)
 
@@ -63,6 +64,14 @@ def _run_in_background(fn, *args):
 
 def _do_generate(page_id, title):
     data = parse_page(page_id, NOTION_TOKEN, title=title)
+    table_info = data.pop("_script_table", None)
+    if table_info:
+        # 自動判斷的角度/鏡位寫回文字腳本表格（標「(自動)」），寫回失敗不影響 PPTX 產出
+        try:
+            table, cmap = table_info
+            write_back(table, cmap, data["scenes"], lambda bid, payload: _patch_block(bid, payload, NOTION_TOKEN))
+        except Exception:  # noqa: BLE001
+            traceback.print_exc(file=sys.stderr)
     with tempfile.TemporaryDirectory() as tmp:
         materialize_images(data, tmp)
         out_name = f"{data['meta']['素材名稱']}_分鏡腳本.pptx"
@@ -72,7 +81,7 @@ def _do_generate(page_id, title):
 
 
 def _do_summary(page_id, title):
-    data = parse_page(page_id, NOTION_TOKEN, title=title)
+    data = parse_page(page_id, NOTION_TOKEN, title=title, source="detail")
     refresh_summary_table(page_id, NOTION_TOKEN, data["scenes"])
 
 

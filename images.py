@@ -52,8 +52,11 @@ def materialize_images(data, dest_dir):
                     pass
                 continue
 
-            text = f"{sh.get('action', '')} {sh.get('line', '')}"
-            path, note = _auto_match(text, styles)
+            if "_asset_row" in sh:  # script_table.enrich 已經配過（還順便拿它的鏡位來推測），不用再配一次
+                path, note = resolve_image_path(sh["_asset_row"]), sh.get("_asset_note")
+            else:
+                text = f"{sh.get('action', '')} {sh.get('line', '')}"
+                path, note = _auto_match(text, styles)
             if path:
                 sh["image"] = path
             if note:

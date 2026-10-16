@@ -12,7 +12,7 @@ import tempfile
 import threading
 import traceback
 
-from flask import Flask, request, jsonify
+from flask import Flask, abort, jsonify, redirect, request, send_from_directory
 
 from notion_parser import parse_page
 from pptx_builder import build_pptx
@@ -128,6 +128,30 @@ def expand_detail():
 @app.route("/", methods=["GET"])
 def health():
     return jsonify({"status": "ok"})
+
+
+GALLERY_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "reference_assets")
+GALLERY_EXTS = {".html", ".jpg", ".jpeg", ".png"}
+
+
+@app.route("/gallery", methods=["GET"])
+@app.route("/gallery/", methods=["GET"])
+@app.route("/gallery/<path:path>", methods=["GET"])
+def gallery(path="素材資料庫.html"):
+    """共用的唯讀素材庫網頁（sync_reference_assets.py 產生）。
+    第一次用 /gallery/?key=<WEBHOOK_SECRET> 開，之後靠 cookie 載圖；沒有 key 一律 403，
+    內部素材不會因為知道 Render 網址就被看到。"""
+    key = request.args.get("key")
+    if key != WEBHOOK_SECRET and request.cookies.get("gallery_key") != WEBHOOK_SECRET:
+        return "需要正確的 key：/gallery/?key=...", 403
+    if not request.path.startswith("/gallery/"):
+        return redirect("/gallery/" + (f"?key={key}" if key else ""))
+    if os.path.splitext(path)[1].lower() not in GALLERY_EXTS:
+        abort(404)
+    resp = send_from_directory(GALLERY_DIR, path)
+    if key == WEBHOOK_SECRET:
+        resp.set_cookie("gallery_key", key, max_age=180 * 86400, httponly=True, secure=True, samesite="Lax")
+    return resp
 
 
 @app.route("/debug/assets", methods=["GET"])

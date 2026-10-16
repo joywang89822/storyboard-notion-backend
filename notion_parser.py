@@ -390,6 +390,9 @@ def parse_page(page_id, token, title=None, today_str=None, source="table"):
             data["scenes"] = script_table.build_scenes(rows, scenes)
             data["_script_table"] = (table, cmap)
         script_table.enrich(data["scenes"], meta.get("影像特殊需求") or [])
+        # 配樂通常整支一樣：分鏡沒另外寫音樂時，直接用基本資訊的「配樂風格」
+        for sc in data["scenes"]:
+            sc["music"] = sc.get("music") or meta.get("配樂風格", "")
     return data
 
 

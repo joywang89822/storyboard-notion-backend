@@ -104,6 +104,8 @@ def build_scenes(rows, detail_scenes=None):
             by_id[sid] = sc
             scenes.append(sc)
         sc = by_id[sid]
+        if r["sfx"] and r["sfx"] not in sc["sfx"]:  # 同一分鏡後面鏡頭的音效也要收進來
+            sc["sfx"] = "；".join(x for x in [sc["sfx"], r["sfx"]] if x)
         d_shots = detail.get(sid, {}).get("shots", [])
         d_shot = d_shots[len(sc["shots"])] if len(sc["shots"]) < len(d_shots) else {}
 

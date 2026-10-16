@@ -119,6 +119,16 @@ sc = st.build_scenes(rows)[0]
 assert sc["shots"][0]["angle"] == "俯視" and sc["shots"][0]["position"] == "全景" and sc["shots"][0]["seconds"] == "2s"
 assert [o["desc"] for o in sc["layoutObjects"]] == ["牌桌", "籌碼"]
 
+# 6b. 表格最後加窄的「音效」欄：同分鏡各鏡頭的音效都收進該分鏡
+sfx = table([("4", "1", "2s", "", "河牌慢動作彈起 落下翻開K", "", "心跳聲"),
+             ("4", "2", "2s", "", "鐵支文案從天而降", "鐵支翻盤啦", "低音鼓"),
+             ("5", "1", "3s", "", "中撲jingle", "", "")],
+            header=("分鏡", "鏡頭", "秒數", "鏡位", "動作", "對白/文案", "音效"))
+rows, cmap = st.read_rows(sfx)
+scs = st.build_scenes(rows)
+assert scs[0]["sfx"] == "心跳聲；低音鼓" and scs[1]["sfx"] == "", [s["sfx"] for s in scs]
+assert cmap["position"] == 3  # 加欄不影響鏡位寫回位置
+
 # 7. 下方完整版有的場景/道具、貼圖會併進來
 detail = [{"id": 1, "layoutObjects": [{"label": "遊戲UI", "desc": "同舊素材"}], "music": "reggae", "sfx": "", "note": "",
            "shots": [{"angle": "", "position": "", "image_url": "https://x/1.png", "note": "手動備註"}]}]

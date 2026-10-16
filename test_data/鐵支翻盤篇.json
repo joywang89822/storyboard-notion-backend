@@ -1,0 +1,87 @@
+{
+  "meta": {
+    "素材名稱": "20260729_中文德撲_video廣宣_鐵支翻盤篇",
+    "投放媒體": ["Google", "TikTok"],
+    "總支數": "6",
+    "總支數備註": "1遊戲 × 長短秒2版本 × 3尺寸(1920×1080、1080×1920、1080×1080)",
+    "單支秒數上限": ["30s"],
+    "是否做長短秒": ["長秒", "短秒"],
+    "素材類型": ["全新"],
+    "影像特殊需求": ["3D"],
+    "音效特殊需求": [],
+    "畫面風格": "高級感，整體為藍色調。採第一人稱POV的視角",
+    "配樂風格": "powerful /reggae",
+    "廣告TA": "25-55歲男性，平常對撲克遊戲熟悉，個性偏向賭徒，不一定會玩德州撲克，但喜歡翻盤贏錢爽感",
+    "廣告目的": "複製成效好的3D素材",
+    "廣告鉤子": "爽贏",
+    "素材尺寸": { "Video": ["1920×1080", "1080×1920", "1080×1080"] },
+    "優先對稿尺寸": ["1920×1080"]
+  },
+  "scenes": [
+    {
+      "id": 1,
+      "layoutObjects": [
+        { "label": "牌桌", "desc": "德州撲克牌桌、藍色絨布" },
+        { "label": "撲克牌", "desc": "寫實風格、撲克牌桌上有公牌 10 J K Q、及一張牌的背面" }
+      ],
+      "music": "",
+      "sfx": "",
+      "shots": [
+        { "angle": "平視", "position": "", "action": "主角第一視角瞇牌、手牌為KK", "line": "", "seconds": "1s" },
+        { "angle": "特寫推進", "position": "", "action": "KKK邊框發光", "line": "", "seconds": "1s" }
+      ]
+    },
+    {
+      "id": 2,
+      "layoutObjects": [
+        { "label": "牌桌", "desc": "同前一cut" },
+        { "label": "撲克牌", "desc": "同前一cut" }
+      ],
+      "music": "",
+      "sfx": "",
+      "shots": [
+        { "angle": "特寫推進", "position": "近景", "action": "對手交疊玩籌碼，且晃動金錶後 all in", "line": "", "seconds": "2.5s" },
+        { "angle": "平視", "position": "近景", "action": "主角手指敲敲桌面 (思考的感覺)後all in", "line": "", "seconds": "2s" }
+      ]
+    },
+    {
+      "id": 3,
+      "layoutObjects": [
+        { "label": "牌桌", "desc": "同前一cut" },
+        { "label": "撲克牌", "desc": "同前一cut" }
+      ],
+      "music": "",
+      "sfx": "",
+      "shots": [
+        { "angle": "俯視", "position": "近景", "action": "雙方大力(有氣勢 加氣流特效)翻牌", "line": "", "seconds": "0.5s" },
+        { "angle": "俯視", "position": "近景", "action": "10 JQKA 發金光 其他壓暗", "line": "順子", "seconds": "1s" },
+        { "angle": "俯視", "position": "近景", "action": "KKK 發金光 其他壓暗", "line": "三條K", "seconds": "1s" }
+      ]
+    },
+    {
+      "id": 4,
+      "layoutObjects": [
+        { "label": "牌桌", "desc": "同前一cut" },
+        { "label": "撲克牌", "desc": "同前一cut" }
+      ],
+      "music": "",
+      "sfx": "河牌翻開過程 > 心跳聲。牌落下 > 低音鼓聲。",
+      "shots": [
+        { "angle": "特寫推進", "position": "近景", "action": "河牌慢動作彈起 落下翻開K", "line": "", "seconds": "2s" },
+        { "angle": "平視", "position": "近景", "action": "「鐵支」文案從天而降砸到對手手牌位置 對手手牌如玻璃破碎", "line": "鐵支 翻盤啦(台)!", "seconds": "2s" },
+        { "angle": "平視", "position": "近景", "action": "噴籌碼 同路徑17s", "line": "三條K", "seconds": "1s" }
+      ]
+    },
+    {
+      "id": 5,
+      "layoutObjects": [
+        { "label": "場景", "desc": "中撲jingle" }
+      ],
+      "music": "",
+      "sfx": "河牌翻開過程 > 心跳聲。牌落下 > 低音鼓聲。",
+      "shots": [
+        { "angle": "平視", "position": "全景", "action": "中撲jingle", "line": "", "seconds": "3s" }
+      ]
+    }
+  ]
+}

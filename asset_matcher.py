@@ -107,8 +107,10 @@ def _score(row, text, viewpoint, cards, subject_rank, styles=()):
     return score
 
 
-def match_asset(text, styles):
+def match_asset(text, styles, games=None):
     """styles: 這次腳本的影像風格清單（來自 meta.影像特殊需求，例如 ["3D"]），空清單代表不限風格。
+    games: 這次腳本的遊戲（meta.遊戲，例如 ["中文德撲"]）；有同遊戲的候選時只從同遊戲挑，
+    避免中撲腳本配到印撲 LUXY POKER 的圖。
 
     回傳 (asset_row_or_None, note_or_None)。
     """
@@ -133,6 +135,9 @@ def match_asset(text, styles):
 
     if not scored:
         return None, f"資料庫目前沒有「{'、'.join(subjects)}」的參考素材"
+    same_game = [sr for sr in scored if games and sr[1].get("game") in games]
+    if same_game:
+        scored = same_game
 
     scored.sort(key=lambda sr: -sr[0])
     picked = scored[0][1]

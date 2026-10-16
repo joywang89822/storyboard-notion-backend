@@ -11,6 +11,7 @@
 import re
 
 import angle_matcher
+import scene_props
 from asset_matcher import match_asset
 from notion_parser import _rt_plain
 
@@ -93,16 +94,19 @@ def build_scenes(rows, detail_scenes=None):
     scenes, by_id = [], {}
     for r in rows:
         sid = _scene_id(r["scene"])
+        layout_text = "" if AUTO_MARK in r["layout"] else r["layout"]  # (自動) 的格子每次重新判斷
         if sid not in by_id:
             d = detail.get(sid, {})
-            layout = [{"label": x.split("：")[0].split(":")[0].strip(), "desc": x}
-                      for x in re.split(r"[\n、]", r["layout"]) if x.strip()] if r["layout"] else d.get("layoutObjects", [])
-            sc = {"id": sid, "layoutObjects": layout, "music": r["music"] or d.get("music", ""),
-                  "sfx": r["sfx"] or d.get("sfx", ""), "note": d.get("note", ""), "shots": []}
+            sc = {"id": sid, "layoutObjects": scene_props.expand(layout_text) if layout_text else d.get("layoutObjects", []),
+                  "music": r["music"] or d.get("music", ""), "sfx": r["sfx"] or d.get("sfx", ""),
+                  "note": d.get("note", ""), "shots": [], "_first_row_id": r["row_id"]}
             if d.get("image_url"):
                 sc["image_url"] = d["image_url"]
             by_id[sid] = sc
             scenes.append(sc)
+        elif layout_text:  # 同一分鏡後面鏡頭寫的道具也收進來
+            sc = by_id[sid]
+            sc["layoutObjects"] += [o for o in scene_props.expand(layout_text) if o not in sc["layoutObjects"]]
         sc = by_id[sid]
         if r["sfx"] and r["sfx"] not in sc["sfx"]:  # 同一分鏡後面鏡頭的音效也要收進來
             sc["sfx"] = "；".join(x for x in [sc["sfx"], r["sfx"]] if x)
@@ -126,14 +130,23 @@ def build_scenes(rows, detail_scenes=None):
     return scenes
 
 
-def enrich(scenes, styles):
+def enrich(scenes, styles, games=None):
     """補齊每個鏡頭的角度/鏡位，並預先配好參考素材（images.py 會直接用 _asset_row，不用再配一次）。"""
     style = angle_matcher.style_of(styles)
-    for sc in scenes:
+    for i, sc in enumerate(scenes):
+        if not sc.get("layoutObjects"):
+            # 場景/道具沒寫：片尾分鏡帶片尾代號；第一個分鏡依風格帶預設（寫回表格標 (自動)）；其他沿用前一個
+            actions = " ".join(sh.get("action", "") for sh in sc["shots"])
+            auto = scene_props.detect_ending(actions) or (scene_props.DEFAULTS.get(style, "") if i == 0 else "")
+            if auto:
+                sc["layoutObjects"] = scene_props.expand(auto)
+                sc["_layout_auto"] = auto
+            elif i > 0:
+                sc["layoutObjects"] = [{"label": "場景/道具", "desc": scene_props.SAME_AS_PREV}]
         for sh in sc["shots"]:
             text = f"{sh.get('action', '')} {sh.get('line', '')}"
             if not sh.get("image_url"):
-                row, note = match_asset(text, styles)
+                row, note = match_asset(text, styles, games)
                 sh["_asset_row"], sh["_asset_note"] = row, note
             if sh.get("angle") and sh.get("position"):
                 continue
@@ -159,24 +172,29 @@ def _writable_rt(rich_text):
 
 
 def write_back(table, cmap, scenes, patch_block):
-    """把自動推測的角度/鏡位寫回表格「鏡位」欄（標「(自動)」）。人工填過的格子不動。
-    patch_block(block_id, payload) 由呼叫端提供（方便離線測試）。回傳改了幾格。"""
-    if "position" not in cmap:
-        return 0
-    col = cmap["position"]
-    n = 0
+    """把自動判斷的結果寫回表格（灰字、標「(自動)」）：
+    - 「鏡位」欄：角度・鏡位
+    - 「場景/道具」欄：第一個分鏡的風格預設、片尾分鏡的片尾代號
+    人工填過的格子不動。patch_block(block_id, payload) 由呼叫端提供（方便離線測試）。回傳改了幾格。"""
+    wanted = {}  # row_id -> {col: value}
     for sc in scenes:
+        if sc.get("_layout_auto") and "layout" in cmap and sc.get("_first_row_id"):
+            wanted.setdefault(sc["_first_row_id"], {})[cmap["layout"]] = f"{sc['_layout_auto']} {AUTO_MARK}"
         for sh in sc["shots"]:
-            if sh.get("_explicit") or not sh.get("_row_id"):
-                continue
-            row = next((r for r in table.get("_children", []) if r.get("id") == sh["_row_id"]), None)
-            if row is None:
-                continue
-            cells = [_writable_rt(c) for c in row["table_row"]["cells"]]
-            value = f"{sh['angle']}・{sh['position']} {AUTO_MARK}"
-            if col >= len(cells) or _rt_plain(row["table_row"]["cells"][col]).strip() == value:
-                continue
-            cells[col] = [{"type": "text", "text": {"content": value}, "annotations": {"color": "gray"}}]
-            patch_block(row["id"], {"table_row": {"cells": cells}})
-            n += 1
+            if "position" in cmap and not sh.get("_explicit") and sh.get("_row_id"):
+                wanted.setdefault(sh["_row_id"], {})[cmap["position"]] = f"{sh['angle']}・{sh['position']} {AUTO_MARK}"
+    n = 0
+    for row in table.get("_children", []):
+        changes = wanted.get(row.get("id"))
+        if not changes:
+            continue
+        old = row["table_row"]["cells"]
+        changes = {c: v for c, v in changes.items() if c < len(old) and _rt_plain(old[c]).strip() != v}
+        if not changes:
+            continue
+        cells = [_writable_rt(c) for c in old]
+        for c, v in changes.items():
+            cells[c] = [{"type": "text", "text": {"content": v}, "annotations": {"color": "gray"}}]
+        patch_block(row["id"], {"table_row": {"cells": cells}})
+        n += len(changes)
     return n

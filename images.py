@@ -23,8 +23,8 @@ def _download(url, dest_dir, name_hint):
     return path
 
 
-def _auto_match(text, styles):
-    row, note = match_asset(text, styles)
+def _auto_match(text, styles, games=None):
+    row, note = match_asset(text, styles, games)
     return resolve_image_path(row), note
 
 
@@ -36,6 +36,7 @@ def materialize_images(data, dest_dir):
        note 欄位標記提醒，跟原本人工比對時的做法一致，不會自己亂猜
     """
     styles = data.get("meta", {}).get("影像特殊需求") or []
+    games = data.get("meta", {}).get("遊戲") or []
 
     for s in data.get("scenes", []):
         if s.get("image_url"):
@@ -56,7 +57,7 @@ def materialize_images(data, dest_dir):
                 path, note = resolve_image_path(sh["_asset_row"]), sh.get("_asset_note")
             else:
                 text = f"{sh.get('action', '')} {sh.get('line', '')}"
-                path, note = _auto_match(text, styles)
+                path, note = _auto_match(text, styles, games)
             if path:
                 sh["image"] = path
             if note:

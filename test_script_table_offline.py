@@ -117,7 +117,35 @@ extra = table([("1", "俯視", "全景", "雙方開牌", "", "2s", "牌桌、籌
 rows, cmap = st.read_rows(extra)
 sc = st.build_scenes(rows)[0]
 assert sc["shots"][0]["angle"] == "俯視" and sc["shots"][0]["position"] == "全景" and sc["shots"][0]["seconds"] == "2s"
-assert [o["desc"] for o in sc["layoutObjects"]] == ["牌桌", "籌碼"]
+assert [o["desc"] for o in sc["layoutObjects"]] == ["牌桌", "籌碼堆疊在牌桌上"]  # 認不得的原樣、代號同義詞展開
+
+# 6c. 場景/道具代號：展開成完整說明＋參考路徑；第一個分鏡沒寫 → 依風格預設並寫回 (自動)；後面沒寫 → 同前一cut；片尾自動帶 jingle
+import scene_props
+objs = scene_props.expand("3D藍桌：改紅色絨布、寫實牌\n自訂道具")
+assert objs[0]["label"] == "牌桌" and "改紅色絨布" in objs[0]["desc"] and "參考：X:" in objs[0]["desc"], objs[0]
+assert objs[1]["label"] == "撲克牌" and objs[2] == {"label": "場景/道具", "desc": "自訂道具"}, objs
+hdr = ("分鏡", "鏡頭", "秒數", "鏡位", "動作", "對白/文案", "音效", "場景/道具")
+lay = table([("1", "1", "1s", "", "主角瞇牌AA", "", "", ""),
+             ("2", "1", "2s", "", "雙方開牌", "", "", ""),
+             ("3", "1", "2s", "", "爆金幣", "", "", "經典綠桌"),
+             ("4", "1", "3s", "", "中撲jingle", "", "", "")], header=hdr)
+rows, cmap = st.read_rows(lay)
+scs = st.enrich(st.build_scenes(rows), ["3D"])
+assert scs[0]["_layout_auto"] == "3D藍桌、寫實牌、籌碼堆" and [o["label"] for o in scs[0]["layoutObjects"]] == ["牌桌", "撲克牌", "籌碼"]
+assert scs[1]["layoutObjects"] == [{"label": "場景/道具", "desc": "同前一cut"}] and "_layout_auto" not in scs[1]
+assert "綠底" in scs[2]["layoutObjects"][0]["desc"] and "_layout_auto" not in scs[2]
+assert scs[3]["_layout_auto"] == "中撲jingle" and scs[3]["layoutObjects"][0]["label"] == "片尾"
+calls = {}
+st.write_back(lay, cmap, scs, lambda bid, p: calls.__setitem__(bid, p))
+c0 = calls["r0"]["table_row"]["cells"]
+assert c0[7][0]["text"]["content"] == "3D藍桌、寫實牌、籌碼堆 (自動)" and c0[3][0]["text"]["content"].endswith("(自動)")  # 同一列兩格一次寫
+assert "場景" not in str(calls["r2"]["table_row"]["cells"][7]) and calls["r3"]["table_row"]["cells"][7][0]["text"]["content"] == "中撲jingle (自動)"
+# 寫回之後再跑一次：(自動) 的格子重新判斷、結果一樣就不重寫
+for row in lay["_children"]:
+    if row["id"] in calls:
+        row["table_row"]["cells"] = [[{**x, "plain_text": x["text"]["content"]} for x in c] for c in calls[row["id"]]["table_row"]["cells"]]
+rows2, _ = st.read_rows(lay)
+assert st.write_back(lay, cmap, st.enrich(st.build_scenes(rows2), ["3D"]), lambda *a: None) == 0
 
 # 6b. 表格最後加窄的「音效」欄：同分鏡各鏡頭的音效都收進該分鏡
 sfx = table([("4", "1", "2s", "", "河牌慢動作彈起 落下翻開K", "", "心跳聲"),
@@ -149,3 +177,7 @@ assert row["牌面"] == "KK", row
 row, _ = match_asset("中撲jingle", ["2D"])
 assert row["subject"] == "中撲jingle"
 print("ALL SCRIPT TABLE TESTS PASSED")
+
+# 9. 中撲腳本不要配到印撲（LUXY POKER）的圖
+row, _ = match_asset("雙方開牌", ["3D"], ["中文德撲"])
+assert row is None or row["game"] == "中文德撲", row
